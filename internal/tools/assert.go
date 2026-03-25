@@ -11,6 +11,9 @@ var (
 	_ Tool = (*SearchCode)(nil)
 	// go toolchain
 	_ Tool = (*GoCommand)(nil)
+	// go AST
+	_ Tool = (*GoDefinitions)(nil)
+	_ Tool = (*GoReadDefinition)(nil)
 	// skills
 	_ Tool = (*GetSkill)(nil)
 	// memory

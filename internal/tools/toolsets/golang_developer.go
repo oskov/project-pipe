@@ -26,6 +26,8 @@ func GolangDeveloperTools(
 			tools.NewListFiles(workDir),
 			tools.NewSearchCode(workDir),
 			tools.NewGoCommand(workDir),
+			tools.NewGoDefinitions(workDir),
+			tools.NewGoReadDefinition(workDir),
 		)
 	}
 	return tt

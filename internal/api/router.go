@@ -28,7 +28,7 @@ func NewRouter(s store.Store, llmClient llm.Client, logger *slog.Logger) http.Ha
 			agent.WithLogger(logger),
 		)
 		devManager := agent.NewDevManager(llmClient, s.AgentRuns(),
-			agent.WithTools(toolsets.DevManagerTools(s.AgentMemory(), projectID, golangDeveloper)...),
+			agent.WithTools(toolsets.DevManagerTools(s.AgentMemory(), projectID, "", golangDeveloper)...),
 			agent.WithLogger(logger),
 		)
 		architect := agent.NewArchitect(llmClient, s.AgentRuns(),

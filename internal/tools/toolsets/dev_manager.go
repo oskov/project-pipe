@@ -6,13 +6,14 @@ import (
 )
 
 // DevManagerTools returns the full set of tools for the developer manager agent.
-// Each runner parameter is a specialist developer agent that can be delegated to.
+// workDir is the repository path; code inspection tools are included when non-empty.
 func DevManagerTools(
 	memoryRepo store.AgentMemoryRepository,
 	projectID string,
+	workDir string,
 	golangDeveloperRunner tools.AgentRunner,
 ) []tools.Tool {
-	return []tools.Tool{
+	tt := []tools.Tool{
 		// project-scoped memory
 		tools.NewMemorySave(memoryRepo, projectID, store.AgentTypeDevManager),
 		tools.NewMemoryGet(memoryRepo, projectID, store.AgentTypeDevManager),
@@ -25,4 +26,11 @@ func DevManagerTools(
 			golangDeveloperRunner,
 		),
 	}
+	if workDir != "" {
+		tt = append(tt,
+			tools.NewGoDefinitions(workDir),
+			tools.NewGoReadDefinition(workDir),
+		)
+	}
+	return tt
 }

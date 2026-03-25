@@ -23,6 +23,8 @@ func ArchitectTools(
 			tools.NewReadFileRange(workDir),
 			tools.NewListFiles(workDir),
 			tools.NewSearchCode(workDir),
+			tools.NewGoDefinitions(workDir),
+			tools.NewGoReadDefinition(workDir),
 		)
 	}
 	return tt
