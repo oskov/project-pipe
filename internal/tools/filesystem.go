@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -9,6 +10,12 @@ import (
 	"github.com/oskov/project-pipe/internal/service"
 )
 
+// maxToolOutputBytes is the maximum number of bytes a tool will return in a single call.
+// When a multi-item request exceeds this limit, the tool returns an error asking the
+// agent to request fewer items. For single-item requests the limit is not enforced —
+// the agent cannot split a single file or definition any further.
+const maxToolOutputBytes = 32 * 1024 // 32 KB
+
 // ReadFile reads the full contents of a file within the workspace.
 type ReadFile struct{ svc service.FilesystemService }
 
@@ -16,7 +23,7 @@ func NewReadFile(svc service.FilesystemService) *ReadFile { return &ReadFile{svc
 
 func (t *ReadFile) Name() string { return "read_file" }
 func (t *ReadFile) Description() string {
-	return "Read the full contents of a file (relative to workspace root). Files larger than 32 KB cannot be read whole — use read_file_range to read them in sections."
+	return "Read the full contents of a file (relative to workspace root). Files larger than 32 KB will return a hint to use read_file_range instead."
 }
 func (t *ReadFile) Parameters() json.RawMessage {
 	return json.RawMessage(`{
@@ -37,12 +44,14 @@ func (t *ReadFile) Execute(_ context.Context, argsJSON string) (string, error) {
 	}
 	content, err := t.svc.Read(args.Path)
 	if err != nil {
-		// FileTooBigError has a user-friendly message — return it as result, not error.
-		var big *service.FileTooBigError
-		if asErr(err, &big) {
-			return big.Error(), nil
-		}
 		return "", err
+	}
+	if len(content) > maxToolOutputBytes {
+		lineCount := bytes.Count([]byte(content), []byte("\n")) + 1
+		return fmt.Sprintf(
+			"file too large to read at once (%d bytes, ~%d lines). Use read_file_range with start_line and end_line to read it in sections.",
+			len(content), lineCount,
+		), nil
 	}
 	return content, nil
 }
@@ -77,7 +86,21 @@ func (t *ReadFileRange) Execute(_ context.Context, argsJSON string) (string, err
 	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
 		return "", fmt.Errorf("parse args: %w", err)
 	}
-	return t.svc.ReadRange(args.Path, args.StartLine, args.EndLine)
+	result, err := t.svc.ReadRange(args.Path, args.StartLine, args.EndLine)
+	if err != nil {
+		return "", err
+	}
+	if len(result) > maxToolOutputBytes {
+		rangeDesc := fmt.Sprintf("lines %d–%d", args.StartLine, args.EndLine)
+		if args.EndLine == 0 {
+			rangeDesc = fmt.Sprintf("from line %d to end", args.StartLine)
+		}
+		return fmt.Sprintf(
+			"range too large (%d bytes for %s). Reduce the range to ~%d lines at a time.",
+			len(result), rangeDesc, maxToolOutputBytes/80,
+		), nil
+	}
+	return result, nil
 }
 
 // WriteFile writes (or overwrites) a file within the workspace.
@@ -184,26 +207,4 @@ func (t *SearchCode) Execute(_ context.Context, argsJSON string) (string, error)
 		return fmt.Sprintf("no matches found for %q", args.Query), nil
 	}
 	return strings.Join(results, "\n"), nil
-}
-
-// asErr is a helper for errors.As without importing errors in every call site.
-func asErr[T error](err error, target *T) bool {
-	var e interface{ As(interface{}) bool }
-	_ = e
-	// Use standard errors.As via type assertion chain.
-	type asInterface interface {
-		As(any) bool
-	}
-	for err != nil {
-		if t, ok := err.(T); ok {
-			*target = t
-			return true
-		}
-		if u, ok := err.(interface{ Unwrap() error }); ok {
-			err = u.Unwrap()
-		} else {
-			break
-		}
-	}
-	return false
 }

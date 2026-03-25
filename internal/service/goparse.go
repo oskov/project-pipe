@@ -13,8 +13,8 @@ import (
 // GoParseService provides Go source code inspection using the standard AST.
 type GoParseService interface {
 	// ListDefinitions returns a formatted summary of all top-level definitions
-	// in the given files (relative to workDir).
-	ListDefinitions(files []string) (string, error)
+	// in a single Go source file (relative to workDir).
+	ListDefinitions(file string) (string, error)
 	// ReadDefinition returns the full source (including doc comment) of the
 	// named top-level definition from the given file.
 	ReadDefinition(file, name string) (string, error)
@@ -32,20 +32,15 @@ func (s *goParseService) abs(rel string) string {
 	return filepath.Join(s.workDir, filepath.Clean(rel))
 }
 
-func (s *goParseService) ListDefinitions(files []string) (string, error) {
-	if len(files) == 0 {
-		return "", fmt.Errorf("%w: files list is empty", ErrInvalid)
+func (s *goParseService) ListDefinitions(file string) (string, error) {
+	if file == "" {
+		return "", fmt.Errorf("%w: file is required", ErrInvalid)
 	}
-	var sb strings.Builder
-	for _, f := range files {
-		result, err := listDefinitionsInFile(s.abs(f))
-		if err != nil {
-			fmt.Fprintf(&sb, "=== %s ===\nerror: %s\n\n", f, err)
-			continue
-		}
-		fmt.Fprintf(&sb, "=== %s ===\n%s\n", f, result)
+	result, err := listDefinitionsInFile(s.abs(file))
+	if err != nil {
+		return "", fmt.Errorf("parse %s: %w", file, err)
 	}
-	return sb.String(), nil
+	return result, nil
 }
 
 func (s *goParseService) ReadDefinition(file, name string) (string, error) {

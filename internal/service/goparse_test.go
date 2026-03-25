@@ -19,7 +19,7 @@ func newTestGoParseService(t *testing.T) GoParseService {
 
 func TestGoParseService_ListDefinitions_AllKinds(t *testing.T) {
 	svc := newTestGoParseService(t)
-	out, err := svc.ListDefinitions([]string{fixture})
+	out, err := svc.ListDefinitions(fixture)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -51,7 +51,7 @@ func TestGoParseService_ListDefinitions_AllKinds(t *testing.T) {
 
 func TestGoParseService_ListDefinitions_TypeKinds(t *testing.T) {
 	svc := newTestGoParseService(t)
-	out, err := svc.ListDefinitions([]string{fixture})
+	out, err := svc.ListDefinitions(fixture)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -64,36 +64,19 @@ func TestGoParseService_ListDefinitions_TypeKinds(t *testing.T) {
 	}
 }
 
-func TestGoParseService_ListDefinitions_MultipleFiles(t *testing.T) {
-	svc := newTestGoParseService(t)
-	// Pass the same file twice — both sections should appear.
-	out, err := svc.ListDefinitions([]string{fixture, fixture})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	count := strings.Count(out, "=== "+fixture+" ===")
-	if count != 2 {
-		t.Errorf("expected 2 file sections, got %d\noutput:\n%s", count, out)
-	}
-}
-
 func TestGoParseService_ListDefinitions_NonExistentFile(t *testing.T) {
 	svc := newTestGoParseService(t)
-	out, err := svc.ListDefinitions([]string{"testdata/nonexistent.go"})
-	// Non-existent file is surfaced as an error line in the output, not as err.
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !strings.Contains(out, "error:") {
-		t.Errorf("expected 'error:' in output for missing file, got:\n%s", out)
+	_, err := svc.ListDefinitions("testdata/nonexistent.go")
+	if err == nil {
+		t.Error("expected error for non-existent file, got nil")
 	}
 }
 
-func TestGoParseService_ListDefinitions_EmptyList(t *testing.T) {
+func TestGoParseService_ListDefinitions_EmptyFile(t *testing.T) {
 	svc := newTestGoParseService(t)
-	_, err := svc.ListDefinitions(nil)
+	_, err := svc.ListDefinitions("")
 	if !errors.Is(err, ErrInvalid) {
-		t.Errorf("expected ErrInvalid for empty files list, got: %v", err)
+		t.Errorf("expected ErrInvalid for empty file, got: %v", err)
 	}
 }
 

@@ -1,29 +1,15 @@
 package service
 
 import (
-	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 )
 
-const maxReadFileSize = 32 * 1024 // 32 KB — ~500-line Go file
-
-// FileReadResult is returned by Read when the file is within size limits.
-type FileReadResult struct {
-	Content string
-}
-
-// FileTooBigError is returned by Read when the file exceeds the size limit.
-type FileTooBigError struct {
-	Size      int64
-	LineCount int
-}
-
-func (e *FileTooBigError) Error() string {
-	return fmt.Sprintf("file too large to read at once (%d bytes, ~%d lines). Use read_file_range with start_line and end_line to read it in sections.", e.Size, e.LineCount)
-}
+// maxFileSafetySize is a hard upper limit to prevent reading enormous files into memory.
+// User-facing output size limits are enforced by the tool layer.
+const maxFileSafetySize = 10 * 1024 * 1024 // 10 MB
 
 // FilesystemService provides workspace-scoped file operations.
 type FilesystemService interface {
@@ -52,13 +38,8 @@ func (s *filesystemService) Read(path string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("stat file: %w", err)
 	}
-	if info.Size() > maxReadFileSize {
-		data, err := os.ReadFile(absPath)
-		if err != nil {
-			return "", fmt.Errorf("read file: %w", err)
-		}
-		lineCount := bytes.Count(data, []byte("\n")) + 1
-		return "", &FileTooBigError{Size: info.Size(), LineCount: lineCount}
+	if info.Size() > maxFileSafetySize {
+		return "", fmt.Errorf("file too large to read (%d bytes)", info.Size())
 	}
 	content, err := os.ReadFile(absPath)
 	if err != nil {
