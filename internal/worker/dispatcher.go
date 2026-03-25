@@ -47,6 +47,7 @@ func (d *Dispatcher) runWorker(ctx context.Context, id int) {
 	slog.Info("worker started", "id", id)
 
 	for {
+		// Stop picking up new tasks as soon as shutdown is requested.
 		select {
 		case <-ctx.Done():
 			slog.Info("worker stopped", "id", id)
@@ -56,6 +57,12 @@ func (d *Dispatcher) runWorker(ctx context.Context, id int) {
 
 		task, err := d.tasks.ClaimNext(ctx)
 		if err != nil {
+			if ctx.Err() != nil {
+				// Context was cancelled during the claim — no task was marked
+				// processing, so we can exit cleanly.
+				slog.Info("worker stopped", "id", id)
+				return
+			}
 			slog.Error("worker: claim error", "worker_id", id, "error", err)
 			d.sleep(ctx)
 			continue
@@ -66,10 +73,14 @@ func (d *Dispatcher) runWorker(ctx context.Context, id int) {
 			continue
 		}
 
+		// Execute uses context.Background() so a running task is never
+		// interrupted by a shutdown signal. The poll-loop check at the top of
+		// the next iteration prevents claiming any further tasks after ctx is
+		// cancelled, so the worker drains exactly one in-flight task and exits.
 		logger, closeLog := openTaskLogger(d.logDir, task.ID)
 		slog.Info("worker: executing task", "worker_id", id, "task_id", task.ID, "project_id", task.ProjectID)
 
-		if err := d.tasks.Execute(ctx, task, logger); err != nil {
+		if err := d.tasks.Execute(context.Background(), task, logger); err != nil {
 			slog.Error("worker: task failed", "worker_id", id, "task_id", task.ID, "error", err)
 		}
 

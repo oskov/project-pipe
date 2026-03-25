@@ -101,7 +101,9 @@ func run() error {
 	}
 
 	cancelWorkers()
+	logger.Info("waiting for running tasks to finish...")
 	dispatcher.Wait()
+	logger.Info("all tasks finished, stopping http server")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
