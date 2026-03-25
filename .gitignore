@@ -1,0 +1,25 @@
+# binaries
+bin/
+*.exe
+
+# database files
+*.db
+*.sqlite
+*.sqlite3
+
+# environment / secrets
+.env
+*.env.local
+
+# editor
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Go test cache
+*.test

@@ -1,0 +1,13 @@
+server:
+  port: 8080
+  log_level: info
+  json_log: false
+
+db:
+  driver: sqlite
+  dsn: project-pipe.db
+
+llm:
+  provider: openai
+  model: gpt-4o-mini
+  api_key: ${OPENAI_API_KEY}
