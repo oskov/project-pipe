@@ -1,29 +1,28 @@
 package toolsets
 
 import (
+	"github.com/oskov/project-pipe/internal/service"
 	"github.com/oskov/project-pipe/internal/store"
 	"github.com/oskov/project-pipe/internal/tools"
 )
 
 // ManagerTools returns the full set of tools for the manager agent.
-// devManagerRunner allows the manager to delegate implementation work
-// to the developer manager, which in turn routes to specialist developers.
 func ManagerTools(
-	ticketRepo store.TicketRepository,
-	memoryRepo store.AgentMemoryRepository,
+	ticketSvc service.TicketService,
+	memorySvc service.MemoryService,
 	projectID string,
 	architectRunner tools.AgentRunner,
 	devManagerRunner tools.AgentRunner,
 ) []tools.Tool {
 	return []tools.Tool{
 		// project management
-		tools.NewListTickets(ticketRepo, projectID),
-		tools.NewCreateTicket(ticketRepo, projectID),
-		tools.NewGetTicket(ticketRepo),
+		tools.NewListTickets(ticketSvc, projectID),
+		tools.NewCreateTicket(ticketSvc, projectID),
+		tools.NewGetTicket(ticketSvc),
 		// project-scoped memory
-		tools.NewMemorySave(memoryRepo, projectID, store.AgentTypeManager),
-		tools.NewMemoryGet(memoryRepo, projectID, store.AgentTypeManager),
-		tools.NewMemoryList(memoryRepo, projectID, store.AgentTypeManager),
+		tools.NewMemorySave(memorySvc, projectID, store.AgentTypeManager),
+		tools.NewMemoryGet(memorySvc, projectID, store.AgentTypeManager),
+		tools.NewMemoryList(memorySvc, projectID, store.AgentTypeManager),
 		// sub-agent delegation
 		tools.NewRunAgent(
 			"architect",

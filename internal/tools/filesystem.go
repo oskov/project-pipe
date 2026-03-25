@@ -1,25 +1,18 @@
 package tools
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
+
+	"github.com/oskov/project-pipe/internal/service"
 )
 
-// maxReadFileSize is the upper limit for read_file. Files larger than this
-// should be read in sections with read_file_range.
-// Chosen to comfortably fit a ~500-line Go source file (avg 60 chars/line ≈ 30 KB).
-const maxReadFileSize = 32 * 1024 // 32 KB
-
 // ReadFile reads the full contents of a file within the workspace.
-// Returns an error hint when the file exceeds maxReadFileSize.
-type ReadFile struct{ workDir string }
+type ReadFile struct{ svc service.FilesystemService }
 
-func NewReadFile(workDir string) *ReadFile { return &ReadFile{workDir: workDir} }
+func NewReadFile(svc service.FilesystemService) *ReadFile { return &ReadFile{svc: svc} }
 
 func (t *ReadFile) Name() string { return "read_file" }
 func (t *ReadFile) Description() string {
@@ -42,36 +35,22 @@ func (t *ReadFile) Execute(_ context.Context, argsJSON string) (string, error) {
 	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
 		return "", fmt.Errorf("parse args: %w", err)
 	}
-
-	absPath := filepath.Join(t.workDir, filepath.Clean(args.Path))
-
-	info, err := os.Stat(absPath)
+	content, err := t.svc.Read(args.Path)
 	if err != nil {
-		return "", fmt.Errorf("stat file: %w", err)
-	}
-	if info.Size() > maxReadFileSize {
-		data, err := os.ReadFile(absPath)
-		if err != nil {
-			return "", fmt.Errorf("read file: %w", err)
+		// FileTooBigError has a user-friendly message — return it as result, not error.
+		var big *service.FileTooBigError
+		if asErr(err, &big) {
+			return big.Error(), nil
 		}
-		lineCount := bytes.Count(data, []byte("\n")) + 1
-		return fmt.Sprintf(
-			"file too large to read at once (%d bytes, ~%d lines). Use read_file_range with start_line and end_line to read it in sections.",
-			info.Size(), lineCount,
-		), nil
+		return "", err
 	}
-
-	content, err := os.ReadFile(absPath)
-	if err != nil {
-		return "", fmt.Errorf("read file: %w", err)
-	}
-	return string(content), nil
+	return content, nil
 }
 
 // ReadFileRange reads a specific range of lines from a file (1-indexed, inclusive).
-type ReadFileRange struct{ workDir string }
+type ReadFileRange struct{ svc service.FilesystemService }
 
-func NewReadFileRange(workDir string) *ReadFileRange { return &ReadFileRange{workDir: workDir} }
+func NewReadFileRange(svc service.FilesystemService) *ReadFileRange { return &ReadFileRange{svc: svc} }
 
 func (t *ReadFileRange) Name() string { return "read_file_range" }
 func (t *ReadFileRange) Description() string {
@@ -98,44 +77,13 @@ func (t *ReadFileRange) Execute(_ context.Context, argsJSON string) (string, err
 	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
 		return "", fmt.Errorf("parse args: %w", err)
 	}
-	if args.StartLine < 1 {
-		return "", fmt.Errorf("start_line must be >= 1")
-	}
-
-	data, err := os.ReadFile(filepath.Join(t.workDir, filepath.Clean(args.Path)))
-	if err != nil {
-		return "", fmt.Errorf("read file: %w", err)
-	}
-
-	lines := strings.Split(string(data), "\n")
-	total := len(lines)
-
-	start := args.StartLine - 1 // convert to 0-indexed
-	end := total                // default: read to end
-	if args.EndLine > 0 {
-		end = args.EndLine
-	}
-
-	if start >= total {
-		return fmt.Sprintf("start_line %d exceeds file length (%d lines)", args.StartLine, total), nil
-	}
-	if end > total {
-		end = total
-	}
-
-	selected := lines[start:end]
-	var sb strings.Builder
-	for i, line := range selected {
-		fmt.Fprintf(&sb, "%d: %s\n", args.StartLine+i, line)
-	}
-	return sb.String(), nil
+	return t.svc.ReadRange(args.Path, args.StartLine, args.EndLine)
 }
 
-
 // WriteFile writes (or overwrites) a file within the workspace.
-type WriteFile struct{ workDir string }
+type WriteFile struct{ svc service.FilesystemService }
 
-func NewWriteFile(workDir string) *WriteFile { return &WriteFile{workDir: workDir} }
+func NewWriteFile(svc service.FilesystemService) *WriteFile { return &WriteFile{svc: svc} }
 
 func (t *WriteFile) Name() string        { return "write_file" }
 func (t *WriteFile) Description() string { return "Write content to a file at the given path (relative to workspace root). Creates intermediate directories as needed." }
@@ -158,20 +106,16 @@ func (t *WriteFile) Execute(_ context.Context, argsJSON string) (string, error) 
 	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
 		return "", fmt.Errorf("parse args: %w", err)
 	}
-	absPath := filepath.Join(t.workDir, filepath.Clean(args.Path))
-	if err := os.MkdirAll(filepath.Dir(absPath), 0o755); err != nil {
-		return "", fmt.Errorf("create dirs: %w", err)
-	}
-	if err := os.WriteFile(absPath, []byte(args.Content), 0o644); err != nil {
-		return "", fmt.Errorf("write file: %w", err)
+	if err := t.svc.Write(args.Path, args.Content); err != nil {
+		return "", err
 	}
 	return fmt.Sprintf("wrote %d bytes to %s", len(args.Content), args.Path), nil
 }
 
 // ListFiles lists files in a directory matching an optional glob pattern.
-type ListFiles struct{ workDir string }
+type ListFiles struct{ svc service.FilesystemService }
 
-func NewListFiles(workDir string) *ListFiles { return &ListFiles{workDir: workDir} }
+func NewListFiles(svc service.FilesystemService) *ListFiles { return &ListFiles{svc: svc} }
 
 func (t *ListFiles) Name() string        { return "list_files" }
 func (t *ListFiles) Description() string { return "List files and directories at a path (relative to workspace root). Supports optional glob pattern." }
@@ -194,50 +138,20 @@ func (t *ListFiles) Execute(_ context.Context, argsJSON string) (string, error) 
 	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
 		return "", fmt.Errorf("parse args: %w", err)
 	}
-
-	base := t.workDir
-	if args.Path != "" {
-		base = filepath.Join(t.workDir, filepath.Clean(args.Path))
+	results, err := t.svc.List(args.Path, args.Pattern)
+	if err != nil {
+		return "", err
 	}
-
-	var results []string
-	if args.Pattern != "" {
-		matches, err := filepath.Glob(filepath.Join(base, args.Pattern))
-		if err != nil {
-			return "", fmt.Errorf("glob: %w", err)
-		}
-		for _, m := range matches {
-			rel, _ := filepath.Rel(t.workDir, m)
-			results = append(results, rel)
-		}
-	} else {
-		entries, err := os.ReadDir(base)
-		if err != nil {
-			return "", fmt.Errorf("read dir: %w", err)
-		}
-		for _, e := range entries {
-			name := e.Name()
-			if e.IsDir() {
-				name += "/"
-			}
-			rel, _ := filepath.Rel(t.workDir, filepath.Join(base, name))
-			results = append(results, rel)
-		}
-	}
-
 	if len(results) == 0 {
 		return "(no files found)", nil
 	}
 	return strings.Join(results, "\n"), nil
 }
 
-const maxSearchResults = 50
-const maxLineLength = 200
-
 // SearchCode searches for a text pattern across files in the workspace.
-type SearchCode struct{ workDir string }
+type SearchCode struct{ svc service.FilesystemService }
 
-func NewSearchCode(workDir string) *SearchCode { return &SearchCode{workDir: workDir} }
+func NewSearchCode(svc service.FilesystemService) *SearchCode { return &SearchCode{svc: svc} }
 
 func (t *SearchCode) Name() string        { return "search_code" }
 func (t *SearchCode) Description() string { return "Search for a text pattern across all files in the workspace. Returns matching lines with file paths and line numbers." }
@@ -262,63 +176,34 @@ func (t *SearchCode) Execute(_ context.Context, argsJSON string) (string, error)
 	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
 		return "", fmt.Errorf("parse args: %w", err)
 	}
-	if args.Query == "" {
-		return "", fmt.Errorf("query is required")
-	}
-
-	searchRoot := t.workDir
-	if args.Path != "" {
-		searchRoot = filepath.Join(t.workDir, filepath.Clean(args.Path))
-	}
-
-	var results []string
-	count := 0
-
-	err := filepath.WalkDir(searchRoot, func(path string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return err
-		}
-		if strings.HasPrefix(d.Name(), ".") {
-			return nil
-		}
-		if args.Ext != "" && !strings.HasSuffix(d.Name(), args.Ext) {
-			return nil
-		}
-		if count >= maxSearchResults {
-			return filepath.SkipAll
-		}
-
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return nil
-		}
-
-		rel, _ := filepath.Rel(t.workDir, path)
-		queryLower := strings.ToLower(args.Query)
-		for i, line := range strings.Split(string(data), "\n") {
-			if strings.Contains(strings.ToLower(line), queryLower) {
-				display := line
-				if len(display) > maxLineLength {
-					display = display[:maxLineLength] + "…"
-				}
-				results = append(results, fmt.Sprintf("%s:%d: %s", rel, i+1, display))
-				count++
-				if count >= maxSearchResults {
-					break
-				}
-			}
-		}
-		return nil
-	})
+	results, err := t.svc.Search(args.Query, args.Path, args.Ext)
 	if err != nil {
-		return "", fmt.Errorf("walk: %w", err)
+		return "", err
 	}
-
 	if len(results) == 0 {
 		return fmt.Sprintf("no matches found for %q", args.Query), nil
 	}
-	if count >= maxSearchResults {
-		results = append(results, fmt.Sprintf("... (truncated at %d results)", maxSearchResults))
-	}
 	return strings.Join(results, "\n"), nil
+}
+
+// asErr is a helper for errors.As without importing errors in every call site.
+func asErr[T error](err error, target *T) bool {
+	var e interface{ As(interface{}) bool }
+	_ = e
+	// Use standard errors.As via type assertion chain.
+	type asInterface interface {
+		As(any) bool
+	}
+	for err != nil {
+		if t, ok := err.(T); ok {
+			*target = t
+			return true
+		}
+		if u, ok := err.(interface{ Unwrap() error }); ok {
+			err = u.Unwrap()
+		} else {
+			break
+		}
+	}
+	return false
 }

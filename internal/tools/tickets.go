@@ -5,20 +5,19 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-	"time"
 
-	"github.com/google/uuid"
+	"github.com/oskov/project-pipe/internal/service"
 	"github.com/oskov/project-pipe/internal/store"
 )
 
 // ListTickets lists tickets in a project, optionally filtered by status.
 type ListTickets struct {
-	repo      store.TicketRepository
+	svc       service.TicketService
 	projectID string
 }
 
-func NewListTickets(repo store.TicketRepository, projectID string) *ListTickets {
-	return &ListTickets{repo: repo, projectID: projectID}
+func NewListTickets(svc service.TicketService, projectID string) *ListTickets {
+	return &ListTickets{svc: svc, projectID: projectID}
 }
 
 func (t *ListTickets) Name() string        { return "list_tickets" }
@@ -45,7 +44,7 @@ func (t *ListTickets) Execute(ctx context.Context, argsJSON string) (string, err
 		return "", fmt.Errorf("parse args: %w", err)
 	}
 
-	tickets, err := t.repo.ListByProject(ctx, t.projectID, store.TicketStatus(args.Status))
+	tickets, err := t.svc.List(ctx, t.projectID, store.TicketStatus(args.Status))
 	if err != nil {
 		return "", fmt.Errorf("list tickets: %w", err)
 	}
@@ -66,12 +65,12 @@ func (t *ListTickets) Execute(ctx context.Context, argsJSON string) (string, err
 
 // CreateTicket creates a new ticket in the project.
 type CreateTicket struct {
-	repo      store.TicketRepository
+	svc       service.TicketService
 	projectID string
 }
 
-func NewCreateTicket(repo store.TicketRepository, projectID string) *CreateTicket {
-	return &CreateTicket{repo: repo, projectID: projectID}
+func NewCreateTicket(svc service.TicketService, projectID string) *CreateTicket {
+	return &CreateTicket{svc: svc, projectID: projectID}
 }
 
 func (t *CreateTicket) Name() string        { return "create_ticket" }
@@ -96,17 +95,8 @@ func (t *CreateTicket) Execute(ctx context.Context, argsJSON string) (string, er
 		return "", fmt.Errorf("parse args: %w", err)
 	}
 
-	now := time.Now().UTC()
-	ticket := &store.Ticket{
-		ID:          uuid.New().String(),
-		ProjectID:   t.projectID,
-		Title:       args.Title,
-		Description: args.Description,
-		Status:      store.TicketStatusOpen,
-		CreatedAt:   now,
-		UpdatedAt:   now,
-	}
-	if err := t.repo.Create(ctx, ticket); err != nil {
+	ticket, err := t.svc.Create(ctx, t.projectID, args.Title, args.Description)
+	if err != nil {
 		return "", fmt.Errorf("create ticket: %w", err)
 	}
 	return fmt.Sprintf("created ticket %s: %q", ticket.ID, ticket.Title), nil
@@ -114,11 +104,11 @@ func (t *CreateTicket) Execute(ctx context.Context, argsJSON string) (string, er
 
 // GetTicket retrieves full details of a single ticket.
 type GetTicket struct {
-	repo store.TicketRepository
+	svc service.TicketService
 }
 
-func NewGetTicket(repo store.TicketRepository) *GetTicket {
-	return &GetTicket{repo: repo}
+func NewGetTicket(svc service.TicketService) *GetTicket {
+	return &GetTicket{svc: svc}
 }
 
 func (t *GetTicket) Name() string        { return "get_ticket" }
@@ -141,7 +131,7 @@ func (t *GetTicket) Execute(ctx context.Context, argsJSON string) (string, error
 		return "", fmt.Errorf("parse args: %w", err)
 	}
 
-	tk, err := t.repo.GetByID(ctx, args.TicketID)
+	tk, err := t.svc.GetByID(ctx, args.TicketID)
 	if err != nil {
 		return "", fmt.Errorf("get ticket: %w", err)
 	}

@@ -20,8 +20,10 @@ var (
 	_ Tool = (*MemorySave)(nil)
 	_ Tool = (*MemoryGet)(nil)
 	_ Tool = (*MemoryList)(nil)
-	// delegation
-	_ Tool = (*RunAgent)(nil)
+	// tickets
+	_ Tool = (*ListTickets)(nil)
 	_ Tool = (*CreateTicket)(nil)
 	_ Tool = (*GetTicket)(nil)
+	// delegation
+	_ Tool = (*RunAgent)(nil)
 )
