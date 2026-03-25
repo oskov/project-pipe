@@ -20,6 +20,7 @@ func ArchitectTools(
 	if workDir != "" {
 		tt = append(tt,
 			tools.NewReadFile(workDir),
+			tools.NewReadFileRange(workDir),
 			tools.NewListFiles(workDir),
 			tools.NewSearchCode(workDir),
 		)

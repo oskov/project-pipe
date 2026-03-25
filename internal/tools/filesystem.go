@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -9,13 +10,21 @@ import (
 	"strings"
 )
 
-// ReadFile reads the contents of a file within the workspace.
+// maxReadFileSize is the upper limit for read_file. Files larger than this
+// should be read in sections with read_file_range.
+// Chosen to comfortably fit a ~500-line Go source file (avg 60 chars/line ≈ 30 KB).
+const maxReadFileSize = 32 * 1024 // 32 KB
+
+// ReadFile reads the full contents of a file within the workspace.
+// Returns an error hint when the file exceeds maxReadFileSize.
 type ReadFile struct{ workDir string }
 
 func NewReadFile(workDir string) *ReadFile { return &ReadFile{workDir: workDir} }
 
-func (t *ReadFile) Name() string        { return "read_file" }
-func (t *ReadFile) Description() string { return "Read the full contents of a file at the given path (relative to the workspace root)." }
+func (t *ReadFile) Name() string { return "read_file" }
+func (t *ReadFile) Description() string {
+	return "Read the full contents of a file (relative to workspace root). Files larger than 32 KB cannot be read whole — use read_file_range to read them in sections."
+}
 func (t *ReadFile) Parameters() json.RawMessage {
 	return json.RawMessage(`{
 		"type": "object",
@@ -33,12 +42,95 @@ func (t *ReadFile) Execute(_ context.Context, argsJSON string) (string, error) {
 	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
 		return "", fmt.Errorf("parse args: %w", err)
 	}
-	content, err := os.ReadFile(filepath.Join(t.workDir, filepath.Clean(args.Path)))
+
+	absPath := filepath.Join(t.workDir, filepath.Clean(args.Path))
+
+	info, err := os.Stat(absPath)
+	if err != nil {
+		return "", fmt.Errorf("stat file: %w", err)
+	}
+	if info.Size() > maxReadFileSize {
+		data, err := os.ReadFile(absPath)
+		if err != nil {
+			return "", fmt.Errorf("read file: %w", err)
+		}
+		lineCount := bytes.Count(data, []byte("\n")) + 1
+		return fmt.Sprintf(
+			"file too large to read at once (%d bytes, ~%d lines). Use read_file_range with start_line and end_line to read it in sections.",
+			info.Size(), lineCount,
+		), nil
+	}
+
+	content, err := os.ReadFile(absPath)
 	if err != nil {
 		return "", fmt.Errorf("read file: %w", err)
 	}
 	return string(content), nil
 }
+
+// ReadFileRange reads a specific range of lines from a file (1-indexed, inclusive).
+type ReadFileRange struct{ workDir string }
+
+func NewReadFileRange(workDir string) *ReadFileRange { return &ReadFileRange{workDir: workDir} }
+
+func (t *ReadFileRange) Name() string { return "read_file_range" }
+func (t *ReadFileRange) Description() string {
+	return "Read a range of lines from a file (relative to workspace root). Use this for large files or when you only need a specific section. Lines are 1-indexed."
+}
+func (t *ReadFileRange) Parameters() json.RawMessage {
+	return json.RawMessage(`{
+		"type": "object",
+		"properties": {
+			"path":       {"type": "string",  "description": "Relative file path within the workspace"},
+			"start_line": {"type": "integer", "description": "First line to read (1-indexed, inclusive)"},
+			"end_line":   {"type": "integer", "description": "Last line to read (1-indexed, inclusive). Reads to end of file if omitted."}
+		},
+		"required": ["path", "start_line"]
+	}`)
+}
+
+func (t *ReadFileRange) Execute(_ context.Context, argsJSON string) (string, error) {
+	var args struct {
+		Path      string `json:"path"`
+		StartLine int    `json:"start_line"`
+		EndLine   int    `json:"end_line"`
+	}
+	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
+		return "", fmt.Errorf("parse args: %w", err)
+	}
+	if args.StartLine < 1 {
+		return "", fmt.Errorf("start_line must be >= 1")
+	}
+
+	data, err := os.ReadFile(filepath.Join(t.workDir, filepath.Clean(args.Path)))
+	if err != nil {
+		return "", fmt.Errorf("read file: %w", err)
+	}
+
+	lines := strings.Split(string(data), "\n")
+	total := len(lines)
+
+	start := args.StartLine - 1 // convert to 0-indexed
+	end := total                // default: read to end
+	if args.EndLine > 0 {
+		end = args.EndLine
+	}
+
+	if start >= total {
+		return fmt.Sprintf("start_line %d exceeds file length (%d lines)", args.StartLine, total), nil
+	}
+	if end > total {
+		end = total
+	}
+
+	selected := lines[start:end]
+	var sb strings.Builder
+	for i, line := range selected {
+		fmt.Fprintf(&sb, "%d: %s\n", args.StartLine+i, line)
+	}
+	return sb.String(), nil
+}
+
 
 // WriteFile writes (or overwrites) a file within the workspace.
 type WriteFile struct{ workDir string }

@@ -5,6 +5,7 @@ package tools
 var (
 	// filesystem
 	_ Tool = (*ReadFile)(nil)
+	_ Tool = (*ReadFileRange)(nil)
 	_ Tool = (*WriteFile)(nil)
 	_ Tool = (*ListFiles)(nil)
 	_ Tool = (*SearchCode)(nil)

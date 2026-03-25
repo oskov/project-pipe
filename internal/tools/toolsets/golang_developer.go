@@ -21,6 +21,7 @@ func GolangDeveloperTools(
 	if workDir != "" {
 		tt = append(tt,
 			tools.NewReadFile(workDir),
+			tools.NewReadFileRange(workDir),
 			tools.NewWriteFile(workDir),
 			tools.NewListFiles(workDir),
 			tools.NewSearchCode(workDir),
