@@ -29,4 +29,8 @@ Create(ctx context.Context, task *Task) error
 GetByID(ctx context.Context, id string) (*Task, error)
 UpdateStatus(ctx context.Context, id string, status TaskStatus) error
 SetTicket(ctx context.Context, id string, ticketID string) error
+	// ClaimNext atomically finds the oldest "created" task for any project
+	// that has no "processing" task, marks it "processing" and returns it.
+	// Returns nil, nil when no claimable task exists.
+	ClaimNext(ctx context.Context) (*Task, error)
 }

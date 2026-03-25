@@ -16,7 +16,9 @@ import (
 	"github.com/oskov/project-pipe/internal/llm/langchain"
 	applogger "github.com/oskov/project-pipe/internal/logger"
 	"github.com/oskov/project-pipe/internal/migrate"
+	"github.com/oskov/project-pipe/internal/service"
 	sqlitestore "github.com/oskov/project-pipe/internal/store/sqlite"
+	"github.com/oskov/project-pipe/internal/worker"
 )
 
 func main() {
@@ -57,17 +59,27 @@ func run() error {
 		return fmt.Errorf("init llm: %w", err)
 	}
 
+	// ── services ─────────────────────────────────────────────────────────────
+	taskSvc := service.NewTaskService(db.Tasks(), db.Projects(), api.ManagerFactory(db, llmClient))
+
 	// ── HTTP server ──────────────────────────────────────────────────────────
-	router := api.NewRouter(db, llmClient, logger)
+	router := api.NewRouter(db, llmClient, taskSvc, logger)
 
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.Server.Port),
 		Handler:      router,
 		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 120 * time.Second,
+		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  60 * time.Second,
 	}
 
+	// ── worker pool ──────────────────────────────────────────────────────────
+	dispatcher := worker.New(taskSvc, cfg.Worker.LogDir, cfg.Worker.PoolSize)
+
+	workerCtx, cancelWorkers := context.WithCancel(context.Background())
+	dispatcher.Start(workerCtx)
+
+	// ── start + graceful shutdown ────────────────────────────────────────────
 	errCh := make(chan error, 1)
 	go func() {
 		logger.Info("server started", "addr", srv.Addr)
@@ -81,10 +93,15 @@ func run() error {
 
 	select {
 	case err := <-errCh:
+		cancelWorkers()
+		dispatcher.Wait()
 		return fmt.Errorf("server error: %w", err)
 	case sig := <-quit:
 		logger.Info("shutting down", "signal", sig)
 	}
+
+	cancelWorkers()
+	dispatcher.Wait()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()

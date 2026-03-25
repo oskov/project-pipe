@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/oskov/project-pipe/internal/service"
 )
 
@@ -18,9 +19,15 @@ type createTaskRequest struct {
 }
 
 type createTaskResponse struct {
-	TaskID   string `json:"task_id"`
-	Status   string `json:"status"`
-	Response string `json:"response"`
+	TaskID string `json:"task_id"`
+	Status string `json:"status"`
+}
+
+type getTaskResponse struct {
+	TaskID    string  `json:"task_id"`
+	ProjectID string  `json:"project_id"`
+	Status    string  `json:"status"`
+	TicketID  *string `json:"ticket_id,omitempty"`
 }
 
 func (h *taskHandler) createTask(w http.ResponseWriter, r *http.Request) {
@@ -30,7 +37,7 @@ func (h *taskHandler) createTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := h.tasks.Create(r.Context(), req.ProjectID, req.Prompt)
+	task, err := h.tasks.Create(r.Context(), req.ProjectID, req.Prompt)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrInvalid):
@@ -44,9 +51,29 @@ func (h *taskHandler) createTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusCreated, createTaskResponse{
-		TaskID:   result.TaskID,
-		Status:   string(result.Status),
-		Response: result.Response,
+		TaskID: task.ID,
+		Status: string(task.Status),
+	})
+}
+
+func (h *taskHandler) getTask(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	task, err := h.tasks.GetByID(r.Context(), id)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrNotFound):
+			writeError(w, http.StatusNotFound, err.Error())
+		default:
+			writeError(w, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+
+	writeJSON(w, http.StatusOK, getTaskResponse{
+		TaskID:    task.ID,
+		ProjectID: task.ProjectID,
+		Status:    string(task.Status),
+		TicketID:  task.TicketID,
 	})
 }
 
