@@ -22,24 +22,29 @@ func NewRouter(s store.Store, llmClient llm.Client, logger *slog.Logger) http.Ha
 	r.Use(chimiddleware.Recoverer)
 	r.Use(apimiddleware.StructuredLogger(logger))
 
-	managerFactory := func(projectID string) *agent.Agent {
+	ticketSvc := service.NewTicketService(s.Tickets())
+	memorySvc := service.NewMemoryService(s.AgentMemory())
+
+	managerFactory := func(projectID string) service.ManagerAgent {
+		// Workspace services — nil until GitHub integration provides a workDir.
+		var fsSvc service.FilesystemService
+		var goSvc service.GoToolchainService
+		var parseSvc service.GoParseService
+
 		golangDeveloper := agent.NewGolangDeveloper(llmClient, s.AgentRuns(),
-			agent.WithTools(toolsets.GolangDeveloperTools("", s.AgentMemory(), projectID)...),
+			agent.WithTools(toolsets.GolangDeveloperTools(memorySvc, projectID, fsSvc, goSvc, parseSvc)...),
 			agent.WithLogger(logger),
 		)
 		devManager := agent.NewDevManager(llmClient, s.AgentRuns(),
-			agent.WithTools(toolsets.DevManagerTools(s.AgentMemory(), projectID, "", golangDeveloper)...),
+			agent.WithTools(toolsets.DevManagerTools(memorySvc, projectID, parseSvc, golangDeveloper)...),
 			agent.WithLogger(logger),
 		)
 		architect := agent.NewArchitect(llmClient, s.AgentRuns(),
-			agent.WithTools(toolsets.ArchitectTools("", s.AgentMemory(), projectID)...),
+			agent.WithTools(toolsets.ArchitectTools(memorySvc, projectID, fsSvc, parseSvc)...),
 			agent.WithLogger(logger),
 		)
 		return agent.NewManager(llmClient, s.AgentRuns(),
-			agent.WithTools(toolsets.ManagerTools(
-				s.Tickets(), s.AgentMemory(), projectID,
-				architect, devManager,
-			)...),
+			agent.WithTools(toolsets.ManagerTools(ticketSvc, memorySvc, projectID, architect, devManager)...),
 			agent.WithLogger(logger),
 		)
 	}

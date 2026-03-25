@@ -1,33 +1,41 @@
 package toolsets
 
 import (
+	"github.com/oskov/project-pipe/internal/service"
 	"github.com/oskov/project-pipe/internal/store"
 	"github.com/oskov/project-pipe/internal/tools"
 )
 
 // GolangDeveloperTools returns the full set of tools for the Go developer agent.
-// workDir must be the path to the cloned repository; filesystem and go toolchain
-// tools are only included when workDir is non-empty.
+// fsSvc, goSvc, and parseSvc are workspace-scoped; pass nil when workDir is not yet available.
 func GolangDeveloperTools(
-	workDir string,
-	memoryRepo store.AgentMemoryRepository,
+	memorySvc service.MemoryService,
 	projectID string,
+	fsSvc service.FilesystemService,
+	goSvc service.GoToolchainService,
+	parseSvc service.GoParseService,
 ) []tools.Tool {
 	tt := []tools.Tool{
-		tools.NewMemorySave(memoryRepo, projectID, store.AgentTypeGolangDeveloper),
-		tools.NewMemoryGet(memoryRepo, projectID, store.AgentTypeGolangDeveloper),
-		tools.NewMemoryList(memoryRepo, projectID, store.AgentTypeGolangDeveloper),
+		tools.NewMemorySave(memorySvc, projectID, store.AgentTypeGolangDeveloper),
+		tools.NewMemoryGet(memorySvc, projectID, store.AgentTypeGolangDeveloper),
+		tools.NewMemoryList(memorySvc, projectID, store.AgentTypeGolangDeveloper),
 	}
-	if workDir != "" {
+	if fsSvc != nil {
 		tt = append(tt,
-			tools.NewReadFile(workDir),
-			tools.NewReadFileRange(workDir),
-			tools.NewWriteFile(workDir),
-			tools.NewListFiles(workDir),
-			tools.NewSearchCode(workDir),
-			tools.NewGoCommand(workDir),
-			tools.NewGoDefinitions(workDir),
-			tools.NewGoReadDefinition(workDir),
+			tools.NewReadFile(fsSvc),
+			tools.NewReadFileRange(fsSvc),
+			tools.NewWriteFile(fsSvc),
+			tools.NewListFiles(fsSvc),
+			tools.NewSearchCode(fsSvc),
+		)
+	}
+	if goSvc != nil {
+		tt = append(tt, tools.NewGoCommand(goSvc))
+	}
+	if parseSvc != nil {
+		tt = append(tt,
+			tools.NewGoDefinitions(parseSvc),
+			tools.NewGoReadDefinition(parseSvc),
 		)
 	}
 	return tt

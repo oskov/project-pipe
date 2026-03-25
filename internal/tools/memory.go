@@ -6,18 +6,19 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/oskov/project-pipe/internal/service"
 	"github.com/oskov/project-pipe/internal/store"
 )
 
 // MemorySave saves a key-value pair to the agent's project-scoped memory.
 type MemorySave struct {
-	repo      store.AgentMemoryRepository
+	svc       service.MemoryService
 	projectID string
 	agentType store.AgentType
 }
 
-func NewMemorySave(repo store.AgentMemoryRepository, projectID string, agentType store.AgentType) *MemorySave {
-	return &MemorySave{repo: repo, projectID: projectID, agentType: agentType}
+func NewMemorySave(svc service.MemoryService, projectID string, agentType store.AgentType) *MemorySave {
+	return &MemorySave{svc: svc, projectID: projectID, agentType: agentType}
 }
 
 func (t *MemorySave) Name() string        { return "memory_save" }
@@ -41,7 +42,7 @@ func (t *MemorySave) Execute(ctx context.Context, argsJSON string) (string, erro
 	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
 		return "", fmt.Errorf("parse args: %w", err)
 	}
-	if err := t.repo.Set(ctx, t.projectID, t.agentType, args.Key, args.Value); err != nil {
+	if err := t.svc.Set(ctx, t.projectID, t.agentType, args.Key, args.Value); err != nil {
 		return "", fmt.Errorf("save memory: %w", err)
 	}
 	return fmt.Sprintf("saved memory entry %q", args.Key), nil
@@ -49,13 +50,13 @@ func (t *MemorySave) Execute(ctx context.Context, argsJSON string) (string, erro
 
 // MemoryGet retrieves a single memory entry by key.
 type MemoryGet struct {
-	repo      store.AgentMemoryRepository
+	svc       service.MemoryService
 	projectID string
 	agentType store.AgentType
 }
 
-func NewMemoryGet(repo store.AgentMemoryRepository, projectID string, agentType store.AgentType) *MemoryGet {
-	return &MemoryGet{repo: repo, projectID: projectID, agentType: agentType}
+func NewMemoryGet(svc service.MemoryService, projectID string, agentType store.AgentType) *MemoryGet {
+	return &MemoryGet{svc: svc, projectID: projectID, agentType: agentType}
 }
 
 func (t *MemoryGet) Name() string        { return "memory_get" }
@@ -77,7 +78,7 @@ func (t *MemoryGet) Execute(ctx context.Context, argsJSON string) (string, error
 	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
 		return "", fmt.Errorf("parse args: %w", err)
 	}
-	value, found, err := t.repo.Get(ctx, t.projectID, t.agentType, args.Key)
+	value, found, err := t.svc.Get(ctx, t.projectID, t.agentType, args.Key)
 	if err != nil {
 		return "", fmt.Errorf("get memory: %w", err)
 	}
@@ -87,15 +88,15 @@ func (t *MemoryGet) Execute(ctx context.Context, argsJSON string) (string, error
 	return value, nil
 }
 
-// MemoryList lists all memory keys (with a short preview) for this agent/project.
+// List lists all memory keys (with a short preview) for this agent/project.
 type MemoryList struct {
-	repo      store.AgentMemoryRepository
+	svc       service.MemoryService
 	projectID string
 	agentType store.AgentType
 }
 
-func NewMemoryList(repo store.AgentMemoryRepository, projectID string, agentType store.AgentType) *MemoryList {
-	return &MemoryList{repo: repo, projectID: projectID, agentType: agentType}
+func NewMemoryList(svc service.MemoryService, projectID string, agentType store.AgentType) *MemoryList {
+	return &MemoryList{svc: svc, projectID: projectID, agentType: agentType}
 }
 
 func (t *MemoryList) Name() string        { return "memory_list" }
@@ -105,7 +106,7 @@ func (t *MemoryList) Parameters() json.RawMessage {
 }
 
 func (t *MemoryList) Execute(ctx context.Context, _ string) (string, error) {
-	entries, err := t.repo.List(ctx, t.projectID, t.agentType)
+	entries, err := t.svc.List(ctx, t.projectID, t.agentType)
 	if err != nil {
 		return "", fmt.Errorf("list memory: %w", err)
 	}

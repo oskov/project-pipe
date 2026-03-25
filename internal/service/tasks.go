@@ -6,9 +6,13 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/oskov/project-pipe/internal/agent"
 	"github.com/oskov/project-pipe/internal/store"
 )
+
+// ManagerAgent is satisfied by agent.Agent — defined here to avoid import cycles.
+type ManagerAgent interface {
+	Run(ctx context.Context, taskID, projectID, prompt string) (string, error)
+}
 
 // CreateTaskResult holds the outcome of a processed task.
 type CreateTaskResult struct {
@@ -25,13 +29,13 @@ type TaskService interface {
 type taskService struct {
 	tasks          store.TaskRepository
 	projects       store.ProjectRepository
-	managerFactory func(projectID string) *agent.Agent
+	managerFactory func(projectID string) ManagerAgent
 }
 
 func NewTaskService(
 	tasks store.TaskRepository,
 	projects store.ProjectRepository,
-	managerFactory func(projectID string) *agent.Agent,
+	managerFactory func(projectID string) ManagerAgent,
 ) TaskService {
 	return &taskService{
 		tasks:          tasks,

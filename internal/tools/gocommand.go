@@ -1,29 +1,20 @@
 package tools
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"os/exec"
-	"strings"
+
+	"github.com/oskov/project-pipe/internal/service"
 )
 
 // GoCommand runs Go toolchain commands in the workspace directory.
-// Only an explicit allowlist of subcommands is permitted for safety.
 type GoCommand struct {
-	workDir     string
-	allowedSubs map[string]bool
+	svc service.GoToolchainService
 }
 
-// NewGoCommand creates a GoCommand tool restricted to safe Go subcommands.
-func NewGoCommand(workDir string) *GoCommand {
-	allowed := []string{"build", "test", "vet", "fmt", "help", "mod", "run", "generate"}
-	m := make(map[string]bool, len(allowed))
-	for _, s := range allowed {
-		m[s] = true
-	}
-	return &GoCommand{workDir: workDir, allowedSubs: m}
+func NewGoCommand(svc service.GoToolchainService) *GoCommand {
+	return &GoCommand{svc: svc}
 }
 
 func (t *GoCommand) Name() string        { return "go_command" }
@@ -55,28 +46,5 @@ func (t *GoCommand) Execute(ctx context.Context, argsJSON string) (string, error
 	if err := json.Unmarshal([]byte(argsJSON), &input); err != nil {
 		return "", fmt.Errorf("parse args: %w", err)
 	}
-
-	if !t.allowedSubs[input.Subcommand] {
-		allowed := make([]string, 0, len(t.allowedSubs))
-		for k := range t.allowedSubs {
-			allowed = append(allowed, k)
-		}
-		return "", fmt.Errorf("subcommand %q is not allowed; permitted: %s", input.Subcommand, strings.Join(allowed, ", "))
-	}
-
-	cmdArgs := append([]string{input.Subcommand}, input.Args...)
-	cmd := exec.CommandContext(ctx, "go", cmdArgs...)
-	cmd.Dir = t.workDir
-
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &out
-
-	err := cmd.Run()
-	output := out.String()
-	if output == "" && err != nil {
-		output = err.Error()
-	}
-	// Return output regardless of exit code so the agent can reason about errors.
-	return output, nil
+	return t.svc.Run(ctx, input.Subcommand, input.Args)
 }

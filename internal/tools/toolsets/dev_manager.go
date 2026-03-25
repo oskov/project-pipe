@@ -1,23 +1,24 @@
 package toolsets
 
 import (
+	"github.com/oskov/project-pipe/internal/service"
 	"github.com/oskov/project-pipe/internal/store"
 	"github.com/oskov/project-pipe/internal/tools"
 )
 
 // DevManagerTools returns the full set of tools for the developer manager agent.
-// workDir is the repository path; code inspection tools are included when non-empty.
+// parseSvc is workspace-scoped; pass nil when workDir is not yet available.
 func DevManagerTools(
-	memoryRepo store.AgentMemoryRepository,
+	memorySvc service.MemoryService,
 	projectID string,
-	workDir string,
+	parseSvc service.GoParseService,
 	golangDeveloperRunner tools.AgentRunner,
 ) []tools.Tool {
 	tt := []tools.Tool{
 		// project-scoped memory
-		tools.NewMemorySave(memoryRepo, projectID, store.AgentTypeDevManager),
-		tools.NewMemoryGet(memoryRepo, projectID, store.AgentTypeDevManager),
-		tools.NewMemoryList(memoryRepo, projectID, store.AgentTypeDevManager),
+		tools.NewMemorySave(memorySvc, projectID, store.AgentTypeDevManager),
+		tools.NewMemoryGet(memorySvc, projectID, store.AgentTypeDevManager),
+		tools.NewMemoryList(memorySvc, projectID, store.AgentTypeDevManager),
 		// specialist developers
 		tools.NewRunAgent(
 			"golang_developer",
@@ -26,10 +27,10 @@ func DevManagerTools(
 			golangDeveloperRunner,
 		),
 	}
-	if workDir != "" {
+	if parseSvc != nil {
 		tt = append(tt,
-			tools.NewGoDefinitions(workDir),
-			tools.NewGoReadDefinition(workDir),
+			tools.NewGoDefinitions(parseSvc),
+			tools.NewGoReadDefinition(parseSvc),
 		)
 	}
 	return tt
