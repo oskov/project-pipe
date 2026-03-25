@@ -97,12 +97,8 @@ func listDefinitionsInFile(path string) (string, error) {
 		switch d := decl.(type) {
 		case *ast.FuncDecl:
 			line := fset.Position(d.Pos()).Line
-			if d.Recv != nil && len(d.Recv.List) > 0 {
-				recv := receiverType(d.Recv.List[0].Type)
-				fmt.Fprintf(&sb, "  %4d  func   (%s).%s\n", line, recv, d.Name.Name)
-			} else {
-				fmt.Fprintf(&sb, "  %4d  func   %s\n", line, d.Name.Name)
-			}
+			sig := formatFuncSignature(d)
+			fmt.Fprintf(&sb, "  %4d  func   %s\n", line, sig)
 		case *ast.GenDecl:
 			switch d.Tok {
 			case token.TYPE:
@@ -151,6 +147,115 @@ func receiverType(expr ast.Expr) string {
 		return "*" + receiverType(e.X)
 	case *ast.Ident:
 		return e.Name
+	default:
+		return "?"
+	}
+}
+
+// formatFuncSignature returns e.g. "(*Item).String() string" or "NewItem(name string) (*Item, error)".
+func formatFuncSignature(d *ast.FuncDecl) string {
+	var sb strings.Builder
+	if d.Recv != nil && len(d.Recv.List) > 0 {
+		fmt.Fprintf(&sb, "(%s).%s", receiverType(d.Recv.List[0].Type), d.Name.Name)
+	} else {
+		sb.WriteString(d.Name.Name)
+	}
+	sb.WriteString(formatParams(d.Type.Params))
+	if ret := formatResults(d.Type.Results); ret != "" {
+		sb.WriteString(" ")
+		sb.WriteString(ret)
+	}
+	return sb.String()
+}
+
+// formatParams formats a parameter list as "(name type, ...)".
+func formatParams(fl *ast.FieldList) string {
+	if fl == nil {
+		return "()"
+	}
+	var parts []string
+	for _, f := range fl.List {
+		typ := formatExpr(f.Type)
+		if len(f.Names) == 0 {
+			parts = append(parts, typ)
+		} else {
+			var names []string
+			for _, n := range f.Names {
+				names = append(names, n.Name)
+			}
+			parts = append(parts, strings.Join(names, ", ")+" "+typ)
+		}
+	}
+	return "(" + strings.Join(parts, ", ") + ")"
+}
+
+// formatResults formats return types. Single unnamed result → bare type; otherwise → "(type, ...)".
+func formatResults(fl *ast.FieldList) string {
+	if fl == nil || len(fl.List) == 0 {
+		return ""
+	}
+	// single unnamed result
+	if len(fl.List) == 1 && len(fl.List[0].Names) == 0 {
+		return formatExpr(fl.List[0].Type)
+	}
+	var parts []string
+	for _, f := range fl.List {
+		typ := formatExpr(f.Type)
+		if len(f.Names) == 0 {
+			parts = append(parts, typ)
+		} else {
+			var names []string
+			for _, n := range f.Names {
+				names = append(names, n.Name)
+			}
+			parts = append(parts, strings.Join(names, ", ")+" "+typ)
+		}
+	}
+	return "(" + strings.Join(parts, ", ") + ")"
+}
+
+// formatExpr converts an ast.Expr to its Go source representation.
+func formatExpr(expr ast.Expr) string {
+	if expr == nil {
+		return ""
+	}
+	switch e := expr.(type) {
+	case *ast.Ident:
+		return e.Name
+	case *ast.StarExpr:
+		return "*" + formatExpr(e.X)
+	case *ast.SelectorExpr:
+		return formatExpr(e.X) + "." + e.Sel.Name
+	case *ast.ArrayType:
+		if e.Len == nil {
+			return "[]" + formatExpr(e.Elt)
+		}
+		return "[" + formatExpr(e.Len) + "]" + formatExpr(e.Elt)
+	case *ast.MapType:
+		return "map[" + formatExpr(e.Key) + "]" + formatExpr(e.Value)
+	case *ast.ChanType:
+		switch e.Dir {
+		case ast.RECV:
+			return "<-chan " + formatExpr(e.Value)
+		case ast.SEND:
+			return "chan<- " + formatExpr(e.Value)
+		default:
+			return "chan " + formatExpr(e.Value)
+		}
+	case *ast.Ellipsis:
+		return "..." + formatExpr(e.Elt)
+	case *ast.InterfaceType:
+		return "interface{}"
+	case *ast.StructType:
+		return "struct{}"
+	case *ast.FuncType:
+		return "func" + formatParams(e.Params)
+	case *ast.BasicLit:
+		return e.Value
+	case *ast.ParenExpr:
+		return "(" + formatExpr(e.X) + ")"
+	case *ast.IndexExpr:
+		return formatExpr(e.X) + "[" + formatExpr(e.Index) + "]"
 	default:
 		return "?"
 	}

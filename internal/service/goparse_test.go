@@ -28,12 +28,15 @@ func TestGoParseService_ListDefinitions_AllKinds(t *testing.T) {
 		want string
 		desc string
 	}{
-		{"func   NewItem", "standalone function"},
-		{"func   (*Item).String", "pointer receiver method"},
-		{"func   (*Item).Validate", "pointer receiver method (Validate)"},
+		// full signatures for funcs/methods
+		{"func   NewItem(id, value string) *Item", "standalone function with full signature"},
+		{"func   (*Item).String() string", "pointer receiver method with return type"},
+		{"func   (*Item).Validate() error", "pointer receiver method returning error"},
+		// types
 		{"type   Item", "struct type"},
 		{"type   Repository", "interface type"},
 		{"type   mapStore", "type alias"},
+		// consts / vars
 		{"const  MaxItems", "single const"},
 		{"const  ErrNotFound", "grouped const (ErrNotFound)"},
 		{"const  ErrInvalid", "grouped const (ErrInvalid)"},
