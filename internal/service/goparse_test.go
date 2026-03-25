@@ -19,7 +19,7 @@ func newTestGoParseService(t *testing.T) GoParseService {
 
 func TestGoParseService_ListDefinitions_AllKinds(t *testing.T) {
 	svc := newTestGoParseService(t)
-	out, err := svc.ListDefinitions(fixture)
+	out, err := svc.ListDefinitions(fixture, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -54,7 +54,7 @@ func TestGoParseService_ListDefinitions_AllKinds(t *testing.T) {
 
 func TestGoParseService_ListDefinitions_TypeKinds(t *testing.T) {
 	svc := newTestGoParseService(t)
-	out, err := svc.ListDefinitions(fixture)
+	out, err := svc.ListDefinitions(fixture, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -67,9 +67,80 @@ func TestGoParseService_ListDefinitions_TypeKinds(t *testing.T) {
 	}
 }
 
+func TestGoParseService_ListDefinitions_FilterFunc(t *testing.T) {
+	svc := newTestGoParseService(t)
+	out, err := svc.ListDefinitions(fixture, []string{"func"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "NewItem") {
+		t.Errorf("expected func NewItem in output, got:\n%s", out)
+	}
+	if strings.Contains(out, "(*Item).String") {
+		t.Errorf("expected methods to be excluded, got:\n%s", out)
+	}
+	if strings.Contains(out, "type   ") || strings.Contains(out, "var    ") || strings.Contains(out, "const  ") {
+		t.Errorf("expected only funcs, got:\n%s", out)
+	}
+}
+
+func TestGoParseService_ListDefinitions_FilterMethod(t *testing.T) {
+	svc := newTestGoParseService(t)
+	out, err := svc.ListDefinitions(fixture, []string{"method"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "(*Item).String") {
+		t.Errorf("expected method String in output, got:\n%s", out)
+	}
+	if strings.Contains(out, "NewItem(") {
+		t.Errorf("expected standalone funcs to be excluded, got:\n%s", out)
+	}
+}
+
+func TestGoParseService_ListDefinitions_FilterStruct(t *testing.T) {
+	svc := newTestGoParseService(t)
+	out, err := svc.ListDefinitions(fixture, []string{"struct"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(out, "type   Item") {
+		t.Errorf("expected struct Item in output, got:\n%s", out)
+	}
+	if strings.Contains(out, "Repository") {
+		t.Errorf("expected interface to be excluded, got:\n%s", out)
+	}
+	if strings.Contains(out, "func   ") || strings.Contains(out, "var    ") || strings.Contains(out, "const  ") {
+		t.Errorf("expected only struct types, got:\n%s", out)
+	}
+}
+
+func TestGoParseService_ListDefinitions_FilterType(t *testing.T) {
+	svc := newTestGoParseService(t)
+	out, err := svc.ListDefinitions(fixture, []string{"type"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// "type" includes all type sub-kinds: struct, interface, alias
+	if !strings.Contains(out, "Item") || !strings.Contains(out, "Repository") || !strings.Contains(out, "mapStore") {
+		t.Errorf("expected all types in output, got:\n%s", out)
+	}
+	if strings.Contains(out, "func   ") || strings.Contains(out, "var    ") || strings.Contains(out, "const  ") {
+		t.Errorf("expected only types, got:\n%s", out)
+	}
+}
+
+func TestGoParseService_ListDefinitions_FilterInvalidKind(t *testing.T) {
+	svc := newTestGoParseService(t)
+	_, err := svc.ListDefinitions(fixture, []string{"unknown"})
+	if !errors.Is(err, ErrInvalid) {
+		t.Errorf("expected ErrInvalid for unknown kind, got: %v", err)
+	}
+}
+
 func TestGoParseService_ListDefinitions_NonExistentFile(t *testing.T) {
 	svc := newTestGoParseService(t)
-	_, err := svc.ListDefinitions("testdata/nonexistent.go")
+	_, err := svc.ListDefinitions("testdata/nonexistent.go", nil)
 	if err == nil {
 		t.Error("expected error for non-existent file, got nil")
 	}
@@ -77,7 +148,7 @@ func TestGoParseService_ListDefinitions_NonExistentFile(t *testing.T) {
 
 func TestGoParseService_ListDefinitions_EmptyFile(t *testing.T) {
 	svc := newTestGoParseService(t)
-	_, err := svc.ListDefinitions("")
+	_, err := svc.ListDefinitions("", nil)
 	if !errors.Is(err, ErrInvalid) {
 		t.Errorf("expected ErrInvalid for empty file, got: %v", err)
 	}

@@ -12,9 +12,11 @@ import (
 
 // GoParseService provides Go source code inspection using the standard AST.
 type GoParseService interface {
-	// ListDefinitions returns a formatted summary of all top-level definitions
-	// in a single Go source file (relative to workDir).
-	ListDefinitions(file string) (string, error)
+	// ListDefinitions returns a formatted summary of top-level definitions in a
+	// single Go source file (relative to workDir). kinds optionally restricts
+	// output to specific definition kinds: "func", "method", "type", "struct",
+	// "interface", "var", "const". Empty or nil means all kinds.
+	ListDefinitions(file string, kinds []string) (string, error)
 	// ReadDefinition returns the full source (including doc comment) of the
 	// named top-level definition from the given file.
 	ReadDefinition(file, name string) (string, error)
@@ -32,11 +34,15 @@ func (s *goParseService) abs(rel string) string {
 	return filepath.Join(s.workDir, filepath.Clean(rel))
 }
 
-func (s *goParseService) ListDefinitions(file string) (string, error) {
+func (s *goParseService) ListDefinitions(file string, kinds []string) (string, error) {
 	if file == "" {
 		return "", fmt.Errorf("%w: file is required", ErrInvalid)
 	}
-	result, err := listDefinitionsInFile(s.abs(file))
+	filter, err := parseKindFilter(kinds)
+	if err != nil {
+		return "", err
+	}
+	result, err := listDefinitionsInFile(s.abs(file), filter)
 	if err != nil {
 		return "", fmt.Errorf("parse %s: %w", file, err)
 	}
@@ -86,16 +92,63 @@ func (s *goParseService) ReadDefinition(file, name string) (string, error) {
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
-func listDefinitionsInFile(path string) (string, error) {
+// validKinds is the set of accepted filter values.
+var validKinds = map[string]bool{
+	"func": true, "method": true,
+	"type": true, "struct": true, "interface": true,
+	"var": true, "const": true,
+}
+
+// parseKindFilter validates and normalises the caller-supplied kinds list.
+// Returns nil map (= all) when kinds is empty.
+func parseKindFilter(kinds []string) (map[string]bool, error) {
+	if len(kinds) == 0 {
+		return nil, nil
+	}
+	filter := make(map[string]bool, len(kinds))
+	for _, k := range kinds {
+		if !validKinds[k] {
+			return nil, fmt.Errorf("%w: unknown kind %q (valid: func, method, type, struct, interface, var, const)", ErrInvalid, k)
+		}
+		filter[k] = true
+	}
+	// "type" implies struct + interface + all other type sub-kinds.
+	// "struct" / "interface" without "type" should still match their typeKind.
+	return filter, nil
+}
+
+func listDefinitionsInFile(path string, filter map[string]bool) (string, error) {
 	fset := token.NewFileSet()
 	f, err := parser.ParseFile(fset, path, nil, parser.ParseComments)
 	if err != nil {
 		return "", err
 	}
+
+	// wantKind returns true when filter is nil (all) or contains the key.
+	wantKind := func(k string) bool { return filter == nil || filter[k] }
+
+	// wantType returns true when we should include a type of the given typeKind string.
+	wantType := func(kind string) bool {
+		if filter == nil {
+			return true
+		}
+		if filter["type"] {
+			return true
+		}
+		return filter[kind] // e.g. filter["struct"] or filter["interface"]
+	}
+
 	var sb strings.Builder
 	for _, decl := range f.Decls {
 		switch d := decl.(type) {
 		case *ast.FuncDecl:
+			isMethod := d.Recv != nil && len(d.Recv.List) > 0
+			if isMethod && !wantKind("method") {
+				continue
+			}
+			if !isMethod && !wantKind("func") {
+				continue
+			}
 			line := fset.Position(d.Pos()).Line
 			sig := formatFuncSignature(d)
 			fmt.Fprintf(&sb, "  %4d  func   %s\n", line, sig)
@@ -104,10 +157,17 @@ func listDefinitionsInFile(path string) (string, error) {
 			case token.TYPE:
 				for _, spec := range d.Specs {
 					ts := spec.(*ast.TypeSpec)
+					kind := typeKind(ts.Type)
+					if !wantType(kind) {
+						continue
+					}
 					line := fset.Position(ts.Pos()).Line
-					fmt.Fprintf(&sb, "  %4d  type   %-30s %s\n", line, ts.Name.Name, typeKind(ts.Type))
+					fmt.Fprintf(&sb, "  %4d  type   %-30s %s\n", line, ts.Name.Name, kind)
 				}
 			case token.VAR:
+				if !wantKind("var") {
+					continue
+				}
 				for _, spec := range d.Specs {
 					vs := spec.(*ast.ValueSpec)
 					line := fset.Position(vs.Pos()).Line
@@ -116,6 +176,9 @@ func listDefinitionsInFile(path string) (string, error) {
 					}
 				}
 			case token.CONST:
+				if !wantKind("const") {
+					continue
+				}
 				for _, spec := range d.Specs {
 					vs := spec.(*ast.ValueSpec)
 					line := fset.Position(vs.Pos()).Line

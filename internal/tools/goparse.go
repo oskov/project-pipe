@@ -19,7 +19,7 @@ func NewGoDefinitions(svc service.GoParseService) *GoDefinitions { return &GoDef
 
 func (t *GoDefinitions) Name() string { return "go_definitions" }
 func (t *GoDefinitions) Description() string {
-	return "List all top-level definitions (functions, methods, types, variables, constants) in one or more Go source files. Use this before reading a file in detail."
+	return "List top-level definitions (functions, methods, types, variables, constants) in one or more Go source files. Optionally filter by kind. Use this before reading a file in detail."
 }
 func (t *GoDefinitions) Parameters() json.RawMessage {
 	return json.RawMessage(`{
@@ -29,6 +29,14 @@ func (t *GoDefinitions) Parameters() json.RawMessage {
 				"type":  "array",
 				"items": {"type": "string"},
 				"description": "Relative paths of Go source files to inspect (1–N files)"
+			},
+			"kinds": {
+				"type": "array",
+				"items": {
+					"type": "string",
+					"enum": ["func", "method", "type", "struct", "interface", "var", "const"]
+				},
+				"description": "Optional filter: return only these definition kinds. Omit or leave empty to return all kinds."
 			}
 		},
 		"required": ["files"]
@@ -38,6 +46,7 @@ func (t *GoDefinitions) Parameters() json.RawMessage {
 func (t *GoDefinitions) Execute(_ context.Context, argsJSON string) (string, error) {
 	var args struct {
 		Files []string `json:"files"`
+		Kinds []string `json:"kinds"`
 	}
 	if err := json.Unmarshal([]byte(argsJSON), &args); err != nil {
 		return "", fmt.Errorf("parse args: %w", err)
@@ -53,7 +62,7 @@ func (t *GoDefinitions) Execute(_ context.Context, argsJSON string) (string, err
 	}
 	results := make([]result, len(args.Files))
 	for i, f := range args.Files {
-		body, err := t.svc.ListDefinitions(f)
+		body, err := t.svc.ListDefinitions(f, args.Kinds)
 		results[i] = result{file: f, body: body, err: err}
 	}
 
