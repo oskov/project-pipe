@@ -24,6 +24,7 @@ type projectResponse struct {
 	ID         string    `json:"id"`
 	Name       string    `json:"name"`
 	GithubRepo string    `json:"github_repo"`
+	LocalPath  string    `json:"local_path"`
 	CreatedAt  time.Time `json:"created_at"`
 }
 
@@ -32,6 +33,7 @@ func toProjectResponse(p *store.Project) projectResponse {
 		ID:         p.ID,
 		Name:       p.Name,
 		GithubRepo: p.GithubRepo,
+		LocalPath:  p.LocalPath,
 		CreatedAt:  p.CreatedAt,
 	}
 }

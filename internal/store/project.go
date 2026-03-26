@@ -9,6 +9,7 @@ type Project struct {
 ID         string    `db:"id"`
 Name       string    `db:"name"`
 GithubRepo string    `db:"github_repo"`
+LocalPath  string    `db:"local_path"`  // absolute path of the cloned repository
 CreatedAt  time.Time `db:"created_at"`
 UpdatedAt  time.Time `db:"updated_at"`
 }

@@ -11,6 +11,7 @@ type Config struct {
 	Server ServerConfig `yaml:"server"`
 	DB     DBConfig     `yaml:"db"`
 	LLM    LLMConfig    `yaml:"llm"`
+	Git    GitConfig    `yaml:"git"`
 }
 
 type ServerConfig struct {
@@ -31,6 +32,12 @@ type LLMConfig struct {
 	BaseURL  string `yaml:"base_url"` // for ollama or custom endpoints
 }
 
+// GitConfig holds settings for git operations and GitHub access.
+type GitConfig struct {
+	ProjectsDir string `yaml:"projects_dir"` // local root where repos are cloned
+	GithubToken string `yaml:"github_token"` // personal access token for private repos
+}
+
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -44,6 +51,7 @@ func Load(path string) (*Config, error) {
 		Server: ServerConfig{Port: 8080, LogLevel: "info", JSONLog: false},
 		DB:     DBConfig{Driver: "sqlite", DSN: "project-pipe.db"},
 		LLM:    LLMConfig{Provider: "openai", Model: "gpt-4o-mini"},
+		Git:    GitConfig{ProjectsDir: "./projects"},
 	}
 
 	if err := yaml.Unmarshal(data, cfg); err != nil {

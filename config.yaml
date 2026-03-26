@@ -11,3 +11,7 @@ llm:
   provider: openai
   model: gpt-4o-mini
   api_key: ${OPENAI_API_KEY}
+
+git:
+  projects_dir: ./projects
+  github_token: ${GITHUB_TOKEN}

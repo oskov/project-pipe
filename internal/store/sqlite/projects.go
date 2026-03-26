@@ -11,9 +11,9 @@ type projectRepo struct{ db *sqlx.DB }
 
 func (r *projectRepo) Create(ctx context.Context, p *store.Project) error {
 _, err := r.db.ExecContext(ctx, `
-INSERT INTO projects (id, name, github_repo, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?)`,
-p.ID, p.Name, p.GithubRepo, p.CreatedAt, p.UpdatedAt,
+INSERT INTO projects (id, name, github_repo, local_path, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?)`,
+p.ID, p.Name, p.GithubRepo, p.LocalPath, p.CreatedAt, p.UpdatedAt,
 )
 return err
 }
