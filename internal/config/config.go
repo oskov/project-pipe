@@ -11,6 +11,7 @@ type Config struct {
 	Server ServerConfig `yaml:"server"`
 	DB     DBConfig     `yaml:"db"`
 	LLM    LLMConfig    `yaml:"llm"`
+	Worker WorkerConfig `yaml:"worker"`
 }
 
 type ServerConfig struct {
@@ -31,6 +32,11 @@ type LLMConfig struct {
 	BaseURL  string `yaml:"base_url"` // for ollama or custom endpoints
 }
 
+type WorkerConfig struct {
+	PoolSize int    `yaml:"pool_size"` // number of concurrent worker goroutines
+	LogDir   string `yaml:"log_dir"`   // directory for per-task log files
+}
+
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -44,6 +50,7 @@ func Load(path string) (*Config, error) {
 		Server: ServerConfig{Port: 8080, LogLevel: "info", JSONLog: false},
 		DB:     DBConfig{Driver: "sqlite", DSN: "project-pipe.db"},
 		LLM:    LLMConfig{Provider: "openai", Model: "gpt-4o-mini"},
+		Worker: WorkerConfig{PoolSize: 2, LogDir: "./logs"},
 	}
 
 	if err := yaml.Unmarshal(data, cfg); err != nil {

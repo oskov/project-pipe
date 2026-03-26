@@ -2,6 +2,7 @@ package sqlite
 
 import (
 "context"
+"database/sql"
 "time"
 
 "github.com/jmoiron/sqlx"
@@ -41,4 +42,61 @@ UPDATE tasks SET ticket_id = ?, updated_at = ? WHERE id = ?`,
 ticketID, time.Now().UTC(), id,
 )
 return err
+}
+
+// ClaimNext atomically selects the oldest "created" task for a project that has
+// no "processing" task and marks it "processing". Returns nil, nil when nothing
+// is claimable.
+func (r *taskRepo) ClaimNext(ctx context.Context) (*store.Task, error) {
+	tx, err := r.db.BeginTxx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	// Find oldest created task whose project has no processing task.
+	var t store.Task
+	err = tx.GetContext(ctx, &t, `
+		SELECT id, project_id, ticket_id, prompt, status, created_at, updated_at
+		FROM tasks t_outer
+		WHERE t_outer.status = 'created'
+		  AND t_outer.project_id IS NOT NULL
+		  AND NOT EXISTS (
+		        SELECT 1
+		        FROM tasks t_proc
+		        WHERE t_proc.status = 'processing'
+		          AND t_proc.project_id = t_outer.project_id
+		  )
+		ORDER BY t_outer.created_at ASC
+		LIMIT 1`)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	now := time.Now().UTC()
+	res, err := tx.ExecContext(ctx, `
+		UPDATE tasks SET status = 'processing', updated_at = ? WHERE id = ? AND status = 'created'`,
+		now, t.ID)
+	if err != nil {
+		return nil, err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if affected == 0 {
+		// Another worker claimed this task between our SELECT and UPDATE.
+		return nil, nil
+	}
+
+	if err = tx.Commit(); err != nil {
+		return nil, err
+	}
+
+	t.Status = store.TaskStatusProcessing
+	t.UpdatedAt = now
+	return &t, nil
 }

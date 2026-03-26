@@ -13,11 +13,16 @@ import (
 
 	"github.com/oskov/project-pipe/internal/api"
 	"github.com/oskov/project-pipe/internal/config"
+	"github.com/oskov/project-pipe/internal/factory"
 	"github.com/oskov/project-pipe/internal/llm/langchain"
 	applogger "github.com/oskov/project-pipe/internal/logger"
 	"github.com/oskov/project-pipe/internal/migrate"
+	"github.com/oskov/project-pipe/internal/service"
 	sqlitestore "github.com/oskov/project-pipe/internal/store/sqlite"
+	"github.com/oskov/project-pipe/internal/worker"
 )
+
+const workerShutdownTimeout = 5 * time.Minute
 
 func main() {
 	if err := run(); err != nil {
@@ -57,17 +62,27 @@ func run() error {
 		return fmt.Errorf("init llm: %w", err)
 	}
 
+	// ── services ─────────────────────────────────────────────────────────────
+	taskSvc := service.NewTaskService(db.Tasks(), db.Projects(), factory.ManagerFactory(db, llmClient))
+
 	// ── HTTP server ──────────────────────────────────────────────────────────
-	router := api.NewRouter(db, llmClient, logger)
+	router := api.NewRouter(db, llmClient, taskSvc, logger)
 
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.Server.Port),
 		Handler:      router,
 		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 120 * time.Second,
+		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  60 * time.Second,
 	}
 
+	// ── worker pool ──────────────────────────────────────────────────────────
+	dispatcher := worker.New(taskSvc, cfg.Worker.LogDir, cfg.Worker.PoolSize)
+
+	workerCtx, cancelWorkers := context.WithCancel(context.Background())
+	dispatcher.Start(workerCtx)
+
+	// ── start + graceful shutdown ────────────────────────────────────────────
 	errCh := make(chan error, 1)
 	go func() {
 		logger.Info("server started", "addr", srv.Addr)
@@ -81,10 +96,21 @@ func run() error {
 
 	select {
 	case err := <-errCh:
+		cancelWorkers()
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), workerShutdownTimeout)
+		defer shutdownCancel()
+		dispatcher.Wait(shutdownCtx)
 		return fmt.Errorf("server error: %w", err)
 	case sig := <-quit:
 		logger.Info("shutting down", "signal", sig)
 	}
+
+	cancelWorkers()
+	logger.Info("waiting for running tasks to finish...")
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), workerShutdownTimeout)
+	defer shutdownCancel()
+	dispatcher.Wait(shutdownCtx)
+	logger.Info("all tasks finished, stopping http server")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()

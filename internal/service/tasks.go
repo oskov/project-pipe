@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -14,28 +15,30 @@ type ManagerAgent interface {
 	Run(ctx context.Context, taskID, projectID, prompt string) (string, error)
 }
 
-// CreateTaskResult holds the outcome of a processed task.
-type CreateTaskResult struct {
-	TaskID   string
-	Status   store.TaskStatus
-	Response string
-}
-
 // TaskService defines business operations for tasks.
 type TaskService interface {
-	Create(ctx context.Context, projectID, prompt string) (*CreateTaskResult, error)
+	// Create persists a new task with status "created" and returns it.
+	Create(ctx context.Context, projectID, prompt string) (*store.Task, error)
+	// GetByID returns the task by ID.
+	GetByID(ctx context.Context, id string) (*store.Task, error)
+	// ClaimNext atomically picks the next claimable task and marks it
+	// "processing". Returns nil, nil when no task is available.
+	ClaimNext(ctx context.Context) (*store.Task, error)
+	// Execute runs the agent for an already-claimed task using the provided
+	// logger, and updates the task status to completed or failed.
+	Execute(ctx context.Context, task *store.Task, logger *slog.Logger) error
 }
 
 type taskService struct {
 	tasks          store.TaskRepository
 	projects       store.ProjectRepository
-	managerFactory func(projectID string) ManagerAgent
+	managerFactory func(projectID string, logger *slog.Logger) ManagerAgent
 }
 
 func NewTaskService(
 	tasks store.TaskRepository,
 	projects store.ProjectRepository,
-	managerFactory func(projectID string) ManagerAgent,
+	managerFactory func(projectID string, logger *slog.Logger) ManagerAgent,
 ) TaskService {
 	return &taskService{
 		tasks:          tasks,
@@ -44,7 +47,7 @@ func NewTaskService(
 	}
 }
 
-func (s *taskService) Create(ctx context.Context, projectID, prompt string) (*CreateTaskResult, error) {
+func (s *taskService) Create(ctx context.Context, projectID, prompt string) (*store.Task, error) {
 	if projectID == "" {
 		return nil, fmt.Errorf("%w: project_id is required", ErrInvalid)
 	}
@@ -56,11 +59,9 @@ func (s *taskService) Create(ctx context.Context, projectID, prompt string) (*Cr
 		return nil, fmt.Errorf("%w: project not found", ErrNotFound)
 	}
 
-	taskID := uuid.New().String()
 	now := time.Now().UTC()
-
 	task := &store.Task{
-		ID:        taskID,
+		ID:        uuid.New().String(),
 		ProjectID: projectID,
 		Prompt:    prompt,
 		Status:    store.TaskStatusCreated,
@@ -72,21 +73,37 @@ func (s *taskService) Create(ctx context.Context, projectID, prompt string) (*Cr
 		return nil, fmt.Errorf("%w: failed to create task", ErrInternal)
 	}
 
-	_ = s.tasks.UpdateStatus(ctx, taskID, store.TaskStatusProcessing)
+	return task, nil
+}
 
-	manager := s.managerFactory(projectID)
-
-	response, err := manager.Run(ctx, taskID, projectID, prompt)
+func (s *taskService) GetByID(ctx context.Context, id string) (*store.Task, error) {
+	if id == "" {
+		return nil, fmt.Errorf("%w: id is required", ErrInvalid)
+	}
+	task, err := s.tasks.GetByID(ctx, id)
 	if err != nil {
-		_ = s.tasks.UpdateStatus(ctx, taskID, store.TaskStatusFailed)
-		return nil, fmt.Errorf("%w: agent error: %s", ErrInternal, err)
+		return nil, fmt.Errorf("%w: task not found", ErrNotFound)
+	}
+	return task, nil
+}
+
+func (s *taskService) ClaimNext(ctx context.Context) (*store.Task, error) {
+	return s.tasks.ClaimNext(ctx)
+}
+
+func (s *taskService) Execute(ctx context.Context, task *store.Task, logger *slog.Logger) error {
+	manager := s.managerFactory(task.ProjectID, logger)
+
+	_, err := manager.Run(ctx, task.ID, task.ProjectID, task.Prompt)
+	if err != nil {
+		if updateErr := s.tasks.UpdateStatus(ctx, task.ID, store.TaskStatusFailed); updateErr != nil {
+			logger.Error("failed to update task status to failed", "task_id", task.ID, "error", updateErr)
+		}
+		return fmt.Errorf("agent error for task %s: %w", task.ID, err)
 	}
 
-	_ = s.tasks.UpdateStatus(ctx, taskID, store.TaskStatusCompleted)
-
-	return &CreateTaskResult{
-		TaskID:   taskID,
-		Status:   store.TaskStatusCompleted,
-		Response: response,
-	}, nil
+	if updateErr := s.tasks.UpdateStatus(ctx, task.ID, store.TaskStatusCompleted); updateErr != nil {
+		return fmt.Errorf("failed to update task %s status to completed: %w", task.ID, updateErr)
+	}
+	return nil
 }

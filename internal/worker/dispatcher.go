@@ -1,0 +1,139 @@
+package worker
+
+import (
+	"context"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"sync"
+	"time"
+
+	"github.com/oskov/project-pipe/internal/service"
+	"github.com/oskov/project-pipe/internal/store"
+)
+
+const pollInterval = 2 * time.Second
+
+// Dispatcher manages a pool of worker goroutines that claim and execute tasks.
+type Dispatcher struct {
+	tasks      service.TaskService
+	logDir     string
+	size       int
+	wg         sync.WaitGroup
+	execCtx    context.Context
+	cancelExec context.CancelFunc
+}
+
+// New creates a Dispatcher with the given worker pool size and log directory.
+func New(tasks service.TaskService, logDir string, size int) *Dispatcher {
+	execCtx, cancelExec := context.WithCancel(context.Background())
+	return &Dispatcher{tasks: tasks, logDir: logDir, size: size, execCtx: execCtx, cancelExec: cancelExec}
+}
+
+// Start spawns worker goroutines. They run until ctx is cancelled.
+// Call Wait to block until all workers have exited.
+func (d *Dispatcher) Start(ctx context.Context) {
+	if err := os.MkdirAll(d.logDir, 0o755); err != nil {
+		slog.Error("worker: cannot create log directory", "dir", d.logDir, "error", err)
+	}
+
+	for i := range d.size {
+		d.wg.Add(1)
+		go d.runWorker(ctx, i)
+	}
+}
+
+// Wait blocks until all worker goroutines have stopped.
+// If ctx expires before all workers finish, in-flight task executions are
+// cancelled and the method waits for the workers to exit.
+func (d *Dispatcher) Wait(ctx context.Context) {
+	done := make(chan struct{})
+	go func() {
+		d.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-ctx.Done():
+		slog.Warn("worker: shutdown timeout exceeded, cancelling in-flight tasks")
+		d.cancelExec()
+		d.wg.Wait()
+	}
+}
+
+func (d *Dispatcher) runWorker(ctx context.Context, id int) {
+	defer d.wg.Done()
+	slog.Info("worker started", "id", id)
+
+	for {
+		// Stop picking up new tasks as soon as shutdown is requested.
+		select {
+		case <-ctx.Done():
+			slog.Info("worker stopped", "id", id)
+			return
+		default:
+		}
+
+		task, err := d.tasks.ClaimNext(ctx)
+		if err != nil {
+			if ctx.Err() != nil {
+				// Context was cancelled during the claim — no task was marked
+				// processing, so we can exit cleanly.
+				slog.Info("worker stopped", "id", id)
+				return
+			}
+			slog.Error("worker: claim error", "worker_id", id, "error", err)
+			d.sleep(ctx)
+			continue
+		}
+		if task == nil {
+			// No claimable task — wait before polling again.
+			d.sleep(ctx)
+			continue
+		}
+
+		// Execute uses d.execCtx so that in-flight tasks can be cancelled by
+		// Wait when the shutdown grace period expires, while surviving the
+		// ordinary poll context cancellation (ctx).
+		slog.Info("worker: executing task", "worker_id", id, "task_id", task.ID, "project_id", task.ProjectID)
+		if err := d.executeTask(task); err != nil {
+			slog.Error("worker: task failed", "worker_id", id, "task_id", task.ID, "error", err)
+		}
+	}
+}
+
+// executeTask opens a per-task log file, runs the task, and closes the log on return.
+func (d *Dispatcher) executeTask(task *store.Task) error {
+	logger, closeLog := openTaskLogger(d.logDir, task.ID)
+	defer closeLog()
+	return d.tasks.Execute(d.execCtx, task, logger)
+}
+
+// sleep waits for pollInterval or until ctx is cancelled.
+func (d *Dispatcher) sleep(ctx context.Context) {
+	select {
+	case <-ctx.Done():
+	case <-time.After(pollInterval):
+	}
+}
+
+// openTaskLogger creates a slog.Logger writing to {logDir}/{taskID}.log.
+// The returned closer flushes and closes the underlying file.
+func openTaskLogger(logDir, taskID string) (*slog.Logger, func()) {
+	path := filepath.Join(logDir, taskID+".log")
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		slog.Warn("worker: cannot open task log file, using default logger", "path", path, "error", err)
+		return slog.Default(), func() {}
+	}
+	logger := slog.New(slog.NewTextHandler(f, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	return logger, func() {
+		if err := f.Sync(); err != nil {
+			slog.Error("worker: failed to sync task log file", "path", path, "error", err)
+		}
+		if err := f.Close(); err != nil {
+			slog.Error("worker: failed to close task log file", "path", path, "error", err)
+		}
+	}
+}
