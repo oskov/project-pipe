@@ -106,5 +106,12 @@ func openTaskLogger(logDir, taskID string) (*slog.Logger, func()) {
 		return slog.Default(), func() {}
 	}
 	logger := slog.New(slog.NewTextHandler(f, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	return logger, func() { _ = f.Close() }
+	return logger, func() {
+		if err := f.Sync(); err != nil {
+			slog.Error("worker: failed to sync task log file", "path", path, "error", err)
+		}
+		if err := f.Close(); err != nil {
+			slog.Error("worker: failed to close task log file", "path", path, "error", err)
+		}
+	}
 }
