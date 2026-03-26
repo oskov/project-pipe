@@ -18,8 +18,8 @@ apimiddleware "github.com/oskov/project-pipe/internal/api/middleware"
 
 // ManagerFactory returns a managerFactory function suitable for TaskService.
 // It resolves the project's local_path from the DB and wires up workspace
-// services (filesystem, go toolchain, go parse) for the cloned repository.
-func ManagerFactory(s store.Store, llmClient llm.Client, projectSvc service.ProjectService) func(string, *slog.Logger) service.ManagerAgent {
+// services (filesystem, go toolchain, go parse, git) for the cloned repository.
+func ManagerFactory(s store.Store, llmClient llm.Client, projectSvc service.ProjectService, githubToken string) func(string, *slog.Logger) service.ManagerAgent {
 ticketSvc := service.NewTicketService(s.Tickets())
 memorySvc := service.NewMemoryService(s.AgentMemory())
 
@@ -32,15 +32,17 @@ workDir = p.LocalPath
 var fsSvc service.FilesystemService
 var goSvc service.GoToolchainService
 var parseSvc service.GoParseService
+var gitSvc service.GitService
 
 if workDir != "" {
 fsSvc = service.NewFilesystemService(workDir)
 goSvc = service.NewGoToolchainService(workDir)
 parseSvc = service.NewGoParseService(workDir)
+gitSvc = service.NewGitService(workDir, githubToken)
 }
 
 golangDeveloper := agent.NewGolangDeveloper(llmClient, s.AgentRuns(),
-agent.WithTools(toolsets.GolangDeveloperTools(memorySvc, projectID, fsSvc, goSvc, parseSvc)...),
+agent.WithTools(toolsets.GolangDeveloperTools(memorySvc, projectID, fsSvc, goSvc, parseSvc, gitSvc)...),
 agent.WithLogger(taskLogger),
 )
 devManager := agent.NewDevManager(llmClient, s.AgentRuns(),

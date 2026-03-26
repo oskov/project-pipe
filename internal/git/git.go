@@ -47,6 +47,85 @@ func Pull(ctx context.Context, workDir, token string) error {
 	return nil
 }
 
+// Status returns the output of "git status --short" for workDir.
+func Status(ctx context.Context, workDir string) (string, error) {
+	out, err := output(ctx, workDir, "git", "status", "--short")
+	if err != nil {
+		return "", fmt.Errorf("git status: %w", err)
+	}
+	if out == "" {
+		return "nothing to commit, working tree clean", nil
+	}
+	return out, nil
+}
+
+// Diff returns the diff for workDir. When staged is true it returns only the
+// staged changes ("git diff --staged").
+func Diff(ctx context.Context, workDir string, staged bool) (string, error) {
+	args := []string{"diff"}
+	if staged {
+		args = append(args, "--staged")
+	}
+	out, err := output(ctx, workDir, "git", args...)
+	if err != nil {
+		return "", fmt.Errorf("git diff: %w", err)
+	}
+	return out, nil
+}
+
+// CurrentBranch returns the name of the currently checked-out branch.
+func CurrentBranch(ctx context.Context, workDir string) (string, error) {
+	out, err := output(ctx, workDir, "git", "rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil {
+		return "", fmt.Errorf("git current branch: %w", err)
+	}
+	return strings.TrimSpace(out), nil
+}
+
+// CheckoutBranch creates a new branch named name and switches to it.
+// If the branch already exists it just switches to it.
+func CheckoutBranch(ctx context.Context, workDir, name string) error {
+	// Try to create; fall back to checkout-only if it already exists.
+	err := run(ctx, workDir, "git", "checkout", "-b", name)
+	if err != nil {
+		if err2 := run(ctx, workDir, "git", "checkout", name); err2 != nil {
+			return fmt.Errorf("git checkout branch: %w", err)
+		}
+	}
+	return nil
+}
+
+// Add stages the given paths. Pass "." to stage everything.
+func Add(ctx context.Context, workDir string, paths []string) error {
+	args := append([]string{"add"}, paths...)
+	if err := run(ctx, workDir, "git", args...); err != nil {
+		return fmt.Errorf("git add: %w", err)
+	}
+	return nil
+}
+
+// Commit creates a commit with message in workDir.
+func Commit(ctx context.Context, workDir, message string) error {
+	if err := run(ctx, workDir, "git", "commit", "-m", message); err != nil {
+		return fmt.Errorf("git commit: %w", err)
+	}
+	return nil
+}
+
+// Push pushes branch to remote (typically "origin").
+func Push(ctx context.Context, workDir, remote, branch, token string) error {
+	// Configure credential helper for this push only.
+	args := []string{"push", remote, branch, "--set-upstream"}
+	if token != "" {
+		cred := credentialHelper(workDir, token)
+		args = append([]string{"-c", cred}, args...)
+	}
+	if err := run(ctx, workDir, "git", args...); err != nil {
+		return fmt.Errorf("git push: %w", err)
+	}
+	return nil
+}
+
 // IsRepo returns true when dir contains a git repository (has a .git entry).
 func IsRepo(dir string) bool {
 	_, err := os.Stat(fmt.Sprintf("%s/.git", dir))
@@ -72,30 +151,36 @@ func injectToken(rawURL, token string) (string, error) {
 }
 
 // credentialHelper returns a git -c argument that supplies the token via a
-// credential helper, used for pull after clone when the token is needed again.
+// credential helper, used for pull/push when the token is needed again.
 func credentialHelper(workDir, token string) string {
 	if token == "" {
 		return ""
 	}
-	// Use a store-based credential: encode the helper as an inline script.
-	// This is safe for non-interactive use.
+	_ = workDir
 	return fmt.Sprintf("credential.helper=!f(){ echo username=x-token; echo password=%s; };f", token)
 }
 
-// run executes a git command, capturing stderr for error messages.
-func run(ctx context.Context, dir string, name string, args ...string) error {
+// output executes a git command and returns stdout as a string.
+func output(ctx context.Context, dir string, name string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	if dir != "" {
 		cmd.Dir = dir
 	}
-	var stderr bytes.Buffer
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		msg := strings.TrimSpace(stderr.String())
 		if msg == "" {
 			msg = err.Error()
 		}
-		return fmt.Errorf("%s: %s", strings.Join(args, " "), msg)
+		return "", fmt.Errorf("%s: %s", strings.Join(args, " "), msg)
 	}
-	return nil
+	return stdout.String(), nil
+}
+
+// run executes a git command, capturing stderr for error messages.
+func run(ctx context.Context, dir string, name string, args ...string) error {
+	_, err := output(ctx, dir, name, args...)
+	return err
 }

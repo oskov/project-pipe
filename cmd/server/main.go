@@ -60,7 +60,7 @@ return fmt.Errorf("init llm: %w", err)
 
 // ── services ─────────────────────────────────────────────────────────────
 projectSvc := service.NewProjectService(db.Projects(), cfg.Git.ProjectsDir, cfg.Git.GithubToken)
-taskSvc := service.NewTaskService(db.Tasks(), db.Projects(), api.ManagerFactory(db, llmClient, projectSvc))
+taskSvc := service.NewTaskService(db.Tasks(), db.Projects(), api.ManagerFactory(db, llmClient, projectSvc, cfg.Git.GithubToken))
 
 // ── HTTP server ──────────────────────────────────────────────────────────
 router := api.NewRouter(db, llmClient, cfg.Git, taskSvc, logger)

@@ -7,13 +7,14 @@ import (
 )
 
 // GolangDeveloperTools returns the full set of tools for the Go developer agent.
-// fsSvc, goSvc, and parseSvc are workspace-scoped; pass nil when workDir is not yet available.
+// fsSvc, goSvc, parseSvc, and gitSvc are workspace-scoped; pass nil when workDir is not yet available.
 func GolangDeveloperTools(
 	memorySvc service.MemoryService,
 	projectID string,
 	fsSvc service.FilesystemService,
 	goSvc service.GoToolchainService,
 	parseSvc service.GoParseService,
+	gitSvc service.GitService,
 ) []tools.Tool {
 	tt := []tools.Tool{
 		tools.NewMemorySave(memorySvc, projectID, store.AgentTypeGolangDeveloper),
@@ -36,6 +37,16 @@ func GolangDeveloperTools(
 		tt = append(tt,
 			tools.NewGoDefinitions(parseSvc),
 			tools.NewGoReadDefinition(parseSvc),
+		)
+	}
+	if gitSvc != nil {
+		tt = append(tt,
+			tools.NewGitStatus(gitSvc),
+			tools.NewGitDiff(gitSvc),
+			tools.NewGitCheckoutBranch(gitSvc),
+			tools.NewGitAdd(gitSvc),
+			tools.NewGitCommit(gitSvc),
+			tools.NewGitPush(gitSvc),
 		)
 	}
 	return tt
