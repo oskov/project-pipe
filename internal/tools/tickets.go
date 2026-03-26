@@ -58,7 +58,7 @@ func (t *ListTickets) Execute(ctx context.Context, argsJSON string) (string, err
 		if len(desc) > 80 {
 			desc = desc[:80] + "…"
 		}
-		sb.WriteString(fmt.Sprintf("[%s] (%s) %s\n  %s\n", tk.ID, tk.Status, tk.Title, desc))
+		fmt.Fprintf(&sb, "[%s] (%s) %s\n  %s\n", tk.ID, tk.Status, tk.Title, desc)
 	}
 	return sb.String(), nil
 }

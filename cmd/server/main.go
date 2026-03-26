@@ -45,7 +45,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
-	defer db.Close()
+	defer db.Close() //nolint:errcheck
 
 	if err := migrate.Run(context.Background(), sqlitestore.RawDB(db), "migrations"); err != nil {
 		return fmt.Errorf("run migrations: %w", err)

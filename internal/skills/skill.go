@@ -86,7 +86,7 @@ func (r *Registry) List() string {
 	sb.WriteString("You can request any of the following reference documents using the `get_skill` tool:\n\n")
 	for _, name := range r.order {
 		s := r.skills[name]
-		sb.WriteString(fmt.Sprintf("- **%s**: %s\n", s.Name(), s.Description()))
+		fmt.Fprintf(&sb, "- **%s**: %s\n", s.Name(), s.Description())
 	}
 	return sb.String()
 }
