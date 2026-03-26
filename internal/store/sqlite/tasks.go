@@ -58,12 +58,16 @@ func (r *taskRepo) ClaimNext(ctx context.Context) (*store.Task, error) {
 	var t store.Task
 	err = tx.GetContext(ctx, &t, `
 		SELECT id, project_id, ticket_id, prompt, status, created_at, updated_at
-		FROM tasks
-		WHERE status = 'created'
-		  AND project_id NOT IN (
-		        SELECT DISTINCT project_id FROM tasks WHERE status = 'processing'
+		FROM tasks t_outer
+		WHERE t_outer.status = 'created'
+		  AND t_outer.project_id IS NOT NULL
+		  AND NOT EXISTS (
+		        SELECT 1
+		        FROM tasks t_proc
+		        WHERE t_proc.status = 'processing'
+		          AND t_proc.project_id = t_outer.project_id
 		  )
-		ORDER BY created_at ASC
+		ORDER BY t_outer.created_at ASC
 		LIMIT 1`)
 	if err != nil {
 		if err == sql.ErrNoRows {
