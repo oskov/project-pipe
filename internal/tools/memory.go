@@ -119,7 +119,7 @@ func (t *MemoryList) Execute(ctx context.Context, _ string) (string, error) {
 		if len(preview) > 80 {
 			preview = preview[:80] + "…"
 		}
-		sb.WriteString(fmt.Sprintf("- %s: %s\n", e.Key, preview))
+		fmt.Fprintf(&sb, "- %s: %s\n", e.Key, preview)
 	}
 	return sb.String(), nil
 }
