@@ -17,13 +17,14 @@ apimiddleware "github.com/oskov/project-pipe/internal/api/middleware"
 )
 
 // ManagerFactory returns a managerFactory function suitable for TaskService.
-// It resolves the project's local_path from the DB and wires up workspace
-// services (filesystem, go toolchain, go parse, git) for the cloned repository.
-func ManagerFactory(s store.Store, llmClient llm.Client, projectSvc service.ProjectService, githubToken string) func(string, *slog.Logger) service.ManagerAgent {
+// It resolves the project's local_path from the DB and wires up all
+// workspace-scoped services for the cloned repository.
+func ManagerFactory(s store.Store, llmClient llm.Client, projectSvc service.ProjectService, githubToken string) func(string, string, *slog.Logger) service.ManagerAgent {
 ticketSvc := service.NewTicketService(s.Tickets())
 memorySvc := service.NewMemoryService(s.AgentMemory())
+prSvc := service.NewPullRequestService(s.PullRequests(), s.Projects(), githubToken)
 
-return func(projectID string, taskLogger *slog.Logger) service.ManagerAgent {
+return func(taskID, projectID string, taskLogger *slog.Logger) service.ManagerAgent {
 var workDir string
 if p, err := projectSvc.GetByID(context.Background(), projectID); err == nil {
 workDir = p.LocalPath
@@ -42,11 +43,11 @@ gitSvc = service.NewGitService(workDir, githubToken)
 }
 
 golangDeveloper := agent.NewGolangDeveloper(llmClient, s.AgentRuns(),
-agent.WithTools(toolsets.GolangDeveloperTools(memorySvc, projectID, fsSvc, goSvc, parseSvc, gitSvc)...),
+agent.WithTools(toolsets.GolangDeveloperTools(memorySvc, taskID, projectID, fsSvc, goSvc, parseSvc, gitSvc, prSvc)...),
 agent.WithLogger(taskLogger),
 )
 devManager := agent.NewDevManager(llmClient, s.AgentRuns(),
-agent.WithTools(toolsets.DevManagerTools(memorySvc, projectID, parseSvc, golangDeveloper)...),
+agent.WithTools(toolsets.DevManagerTools(memorySvc, taskID, projectID, parseSvc, prSvc, golangDeveloper)...),
 agent.WithLogger(taskLogger),
 )
 architect := agent.NewArchitect(llmClient, s.AgentRuns(),
@@ -69,13 +70,16 @@ r.Use(chimiddleware.Recoverer)
 r.Use(apimiddleware.StructuredLogger(logger))
 
 projectSvc := service.NewProjectService(s.Projects(), gitCfg.ProjectsDir, gitCfg.GithubToken)
+prSvc := service.NewPullRequestService(s.PullRequests(), s.Projects(), gitCfg.GithubToken)
 
 th := &taskHandler{tasks: taskSvc}
+prh := &taskPRsHandler{prs: prSvc}
 ph := &projectHandler{projects: projectSvc}
 
 r.Route("/api/v1", func(r chi.Router) {
 r.Post("/tasks", th.createTask)
 r.Get("/tasks/{id}", th.getTask)
+r.Get("/tasks/{id}/prs", prh.listTaskPRs)
 
 r.Post("/projects", ph.createProject)
 r.Get("/projects", ph.listProjects)

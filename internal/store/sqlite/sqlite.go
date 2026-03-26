@@ -12,12 +12,13 @@ _ "modernc.org/sqlite"
 )
 
 type sqliteStore struct {
-db          *sqlx.DB
-projects    *projectRepo
-tickets     *ticketRepo
-tasks       *taskRepo
-agentRuns   *agentRunRepo
-agentMemory *agentMemoryRepo
+db           *sqlx.DB
+projects     *projectRepo
+tickets      *ticketRepo
+tasks        *taskRepo
+agentRuns    *agentRunRepo
+agentMemory  *agentMemoryRepo
+pullRequests *pullRequestRepository
 }
 
 // Ensure interface is satisfied at compile time.
@@ -33,22 +34,23 @@ db.SetMaxOpenConns(1)
 if err := db.Ping(); err != nil {
 return nil, fmt.Errorf("ping sqlite: %w", err)
 }
-return &sqliteStore{
-db:          db,
-projects:    &projectRepo{db: db},
-tickets:     &ticketRepo{db: db},
-tasks:       &taskRepo{db: db},
-agentRuns:   &agentRunRepo{db: db},
-agentMemory: &agentMemoryRepo{db: db},
-}, nil
+s := &sqliteStore{db: db}
+s.projects = &projectRepo{db: db}
+s.tickets = &ticketRepo{db: db}
+s.tasks = &taskRepo{db: db}
+s.agentRuns = &agentRunRepo{db: db}
+s.agentMemory = &agentMemoryRepo{db: db}
+s.pullRequests = &pullRequestRepository{db: s}
+return s, nil
 }
 
-func (s *sqliteStore) Projects() store.ProjectRepository        { return s.projects }
-func (s *sqliteStore) Tickets() store.TicketRepository          { return s.tickets }
-func (s *sqliteStore) Tasks() store.TaskRepository              { return s.tasks }
-func (s *sqliteStore) AgentRuns() store.AgentRunRepository      { return s.agentRuns }
-func (s *sqliteStore) AgentMemory() store.AgentMemoryRepository { return s.agentMemory }
-func (s *sqliteStore) Close() error                             { return s.db.Close() }
+func (s *sqliteStore) Projects() store.ProjectRepository           { return s.projects }
+func (s *sqliteStore) Tickets() store.TicketRepository             { return s.tickets }
+func (s *sqliteStore) Tasks() store.TaskRepository                 { return s.tasks }
+func (s *sqliteStore) AgentRuns() store.AgentRunRepository         { return s.agentRuns }
+func (s *sqliteStore) AgentMemory() store.AgentMemoryRepository    { return s.agentMemory }
+func (s *sqliteStore) PullRequests() store.PullRequestRepository   { return s.pullRequests }
+func (s *sqliteStore) Close() error                                { return s.db.Close() }
 
 // RawDB exposes the underlying *sql.DB for operations like migrations.
 func RawDB(s store.Store) *sql.DB {

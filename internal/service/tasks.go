@@ -29,13 +29,13 @@ Execute(ctx context.Context, task *store.Task, logger *slog.Logger) error
 type taskService struct {
 tasks          store.TaskRepository
 projects       store.ProjectRepository
-managerFactory func(projectID string, logger *slog.Logger) ManagerAgent
+managerFactory func(taskID, projectID string, logger *slog.Logger) ManagerAgent
 }
 
 func NewTaskService(
 tasks store.TaskRepository,
 projects store.ProjectRepository,
-managerFactory func(projectID string, logger *slog.Logger) ManagerAgent,
+managerFactory func(taskID, projectID string, logger *slog.Logger) ManagerAgent,
 ) TaskService {
 return &taskService{
 tasks:          tasks,
@@ -84,7 +84,7 @@ return task, nil
 func (s *taskService) Execute(ctx context.Context, task *store.Task, logger *slog.Logger) error {
 _ = s.tasks.UpdateStatus(ctx, task.ID, store.TaskStatusProcessing)
 
-manager := s.managerFactory(task.ProjectID, logger)
+manager := s.managerFactory(task.ID, task.ProjectID, logger)
 
 _, err := manager.Run(ctx, task.ID, task.ProjectID, task.Prompt)
 if err != nil {

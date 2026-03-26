@@ -76,3 +76,40 @@ Status:    string(task.Status),
 TicketID:  task.TicketID,
 })
 }
+
+// taskPRsHandler handles PR-related endpoints scoped to a task.
+type taskPRsHandler struct {
+prs service.PullRequestService
+}
+
+type prResponse struct {
+ID           string `json:"id"`
+GithubNumber int    `json:"github_number"`
+Title        string `json:"title"`
+URL          string `json:"url"`
+HeadBranch   string `json:"head_branch"`
+BaseBranch   string `json:"base_branch"`
+Status       string `json:"status"`
+}
+
+func (h *taskPRsHandler) listTaskPRs(w http.ResponseWriter, r *http.Request) {
+taskID := chi.URLParam(r, "id")
+prs, err := h.prs.GetByTaskID(r.Context(), taskID)
+if err != nil {
+writeError(w, http.StatusInternalServerError, err.Error())
+return
+}
+resp := make([]prResponse, len(prs))
+for i, pr := range prs {
+resp[i] = prResponse{
+ID:           pr.ID,
+GithubNumber: pr.GithubNumber,
+Title:        pr.Title,
+URL:          pr.URL,
+HeadBranch:   pr.HeadBranch,
+BaseBranch:   pr.BaseBranch,
+Status:       string(pr.Status),
+}
+}
+writeJSON(w, http.StatusOK, resp)
+}
