@@ -13,6 +13,7 @@ import (
 
 	"github.com/oskov/project-pipe/internal/api"
 	"github.com/oskov/project-pipe/internal/config"
+	"github.com/oskov/project-pipe/internal/factory"
 	"github.com/oskov/project-pipe/internal/llm/langchain"
 	applogger "github.com/oskov/project-pipe/internal/logger"
 	"github.com/oskov/project-pipe/internal/migrate"
@@ -62,7 +63,7 @@ func run() error {
 	}
 
 	// ── services ─────────────────────────────────────────────────────────────
-	taskSvc := service.NewTaskService(db.Tasks(), db.Projects(), api.ManagerFactory(db, llmClient))
+	taskSvc := service.NewTaskService(db.Tasks(), db.Projects(), factory.ManagerFactory(db, llmClient))
 
 	// ── HTTP server ──────────────────────────────────────────────────────────
 	router := api.NewRouter(db, llmClient, taskSvc, logger)

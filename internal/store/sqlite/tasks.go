@@ -77,10 +77,19 @@ func (r *taskRepo) ClaimNext(ctx context.Context) (*store.Task, error) {
 	}
 
 	now := time.Now().UTC()
-	if _, err = tx.ExecContext(ctx, `
-		UPDATE tasks SET status = 'processing', updated_at = ? WHERE id = ?`,
-		now, t.ID); err != nil {
+	res, err := tx.ExecContext(ctx, `
+		UPDATE tasks SET status = 'processing', updated_at = ? WHERE id = ? AND status = 'created'`,
+		now, t.ID)
+	if err != nil {
 		return nil, err
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if affected == 0 {
+		// Another worker claimed this task between our SELECT and UPDATE.
+		return nil, nil
 	}
 
 	if err = tx.Commit(); err != nil {

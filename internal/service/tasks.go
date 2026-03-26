@@ -77,6 +77,9 @@ func (s *taskService) Create(ctx context.Context, projectID, prompt string) (*st
 }
 
 func (s *taskService) GetByID(ctx context.Context, id string) (*store.Task, error) {
+	if id == "" {
+		return nil, fmt.Errorf("%w: id is required", ErrInvalid)
+	}
 	task, err := s.tasks.GetByID(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("%w: task not found", ErrNotFound)
@@ -93,10 +96,14 @@ func (s *taskService) Execute(ctx context.Context, task *store.Task, logger *slo
 
 	_, err := manager.Run(ctx, task.ID, task.ProjectID, task.Prompt)
 	if err != nil {
-		_ = s.tasks.UpdateStatus(ctx, task.ID, store.TaskStatusFailed)
+		if updateErr := s.tasks.UpdateStatus(ctx, task.ID, store.TaskStatusFailed); updateErr != nil {
+			logger.Error("failed to update task status to failed", "task_id", task.ID, "error", updateErr)
+		}
 		return fmt.Errorf("agent error for task %s: %w", task.ID, err)
 	}
 
-	_ = s.tasks.UpdateStatus(ctx, task.ID, store.TaskStatusCompleted)
+	if updateErr := s.tasks.UpdateStatus(ctx, task.ID, store.TaskStatusCompleted); updateErr != nil {
+		return fmt.Errorf("failed to update task %s status to completed: %w", task.ID, updateErr)
+	}
 	return nil
 }

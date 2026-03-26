@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/oskov/project-pipe/internal/service"
+	"github.com/oskov/project-pipe/internal/store"
 )
 
 const pollInterval = 2 * time.Second
@@ -92,19 +93,21 @@ func (d *Dispatcher) runWorker(ctx context.Context, id int) {
 			continue
 		}
 
-		// Execute uses d.execCtx instead of context.Background() so that a
-		// running task can be cancelled by Wait if the shutdown grace period
-		// expires, while still surviving the ordinary shutdown signal that only
-		// cancels the poll context (ctx).
-		logger, closeLog := openTaskLogger(d.logDir, task.ID)
+		// Execute uses d.execCtx so that in-flight tasks can be cancelled by
+		// Wait when the shutdown grace period expires, while surviving the
+		// ordinary poll context cancellation (ctx).
 		slog.Info("worker: executing task", "worker_id", id, "task_id", task.ID, "project_id", task.ProjectID)
-
-		if err := d.tasks.Execute(d.execCtx, task, logger); err != nil {
+		if err := d.executeTask(task); err != nil {
 			slog.Error("worker: task failed", "worker_id", id, "task_id", task.ID, "error", err)
 		}
-
-		closeLog()
 	}
+}
+
+// executeTask opens a per-task log file, runs the task, and closes the log on return.
+func (d *Dispatcher) executeTask(task *store.Task) error {
+	logger, closeLog := openTaskLogger(d.logDir, task.ID)
+	defer closeLog()
+	return d.tasks.Execute(d.execCtx, task, logger)
 }
 
 // sleep waits for pollInterval or until ctx is cancelled.
