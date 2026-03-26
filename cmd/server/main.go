@@ -21,6 +21,8 @@ import (
 	"github.com/oskov/project-pipe/internal/worker"
 )
 
+const workerShutdownTimeout = 5 * time.Minute
+
 func main() {
 	if err := run(); err != nil {
 		slog.Error("fatal", "error", err)
@@ -94,7 +96,9 @@ func run() error {
 	select {
 	case err := <-errCh:
 		cancelWorkers()
-		dispatcher.Wait()
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), workerShutdownTimeout)
+		defer shutdownCancel()
+		dispatcher.Wait(shutdownCtx)
 		return fmt.Errorf("server error: %w", err)
 	case sig := <-quit:
 		logger.Info("shutting down", "signal", sig)
@@ -102,7 +106,9 @@ func run() error {
 
 	cancelWorkers()
 	logger.Info("waiting for running tasks to finish...")
-	dispatcher.Wait()
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), workerShutdownTimeout)
+	defer shutdownCancel()
+	dispatcher.Wait(shutdownCtx)
 	logger.Info("all tasks finished, stopping http server")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)

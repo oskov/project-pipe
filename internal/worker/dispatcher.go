@@ -15,15 +15,18 @@ const pollInterval = 2 * time.Second
 
 // Dispatcher manages a pool of worker goroutines that claim and execute tasks.
 type Dispatcher struct {
-	tasks  service.TaskService
-	logDir string
-	size   int
-	wg     sync.WaitGroup
+	tasks      service.TaskService
+	logDir     string
+	size       int
+	wg         sync.WaitGroup
+	execCtx    context.Context
+	cancelExec context.CancelFunc
 }
 
 // New creates a Dispatcher with the given worker pool size and log directory.
 func New(tasks service.TaskService, logDir string, size int) *Dispatcher {
-	return &Dispatcher{tasks: tasks, logDir: logDir, size: size}
+	execCtx, cancelExec := context.WithCancel(context.Background())
+	return &Dispatcher{tasks: tasks, logDir: logDir, size: size, execCtx: execCtx, cancelExec: cancelExec}
 }
 
 // Start spawns worker goroutines. They run until ctx is cancelled.
@@ -40,7 +43,23 @@ func (d *Dispatcher) Start(ctx context.Context) {
 }
 
 // Wait blocks until all worker goroutines have stopped.
-func (d *Dispatcher) Wait() { d.wg.Wait() }
+// If ctx expires before all workers finish, in-flight task executions are
+// cancelled and the method waits for the workers to exit.
+func (d *Dispatcher) Wait(ctx context.Context) {
+	done := make(chan struct{})
+	go func() {
+		d.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-ctx.Done():
+		slog.Warn("worker: shutdown timeout exceeded, cancelling in-flight tasks")
+		d.cancelExec()
+		d.wg.Wait()
+	}
+}
 
 func (d *Dispatcher) runWorker(ctx context.Context, id int) {
 	defer d.wg.Done()
@@ -73,14 +92,14 @@ func (d *Dispatcher) runWorker(ctx context.Context, id int) {
 			continue
 		}
 
-		// Execute uses context.Background() so a running task is never
-		// interrupted by a shutdown signal. The poll-loop check at the top of
-		// the next iteration prevents claiming any further tasks after ctx is
-		// cancelled, so the worker drains exactly one in-flight task and exits.
+		// Execute uses d.execCtx instead of context.Background() so that a
+		// running task can be cancelled by Wait if the shutdown grace period
+		// expires, while still surviving the ordinary shutdown signal that only
+		// cancels the poll context (ctx).
 		logger, closeLog := openTaskLogger(d.logDir, task.ID)
 		slog.Info("worker: executing task", "worker_id", id, "task_id", task.ID, "project_id", task.ProjectID)
 
-		if err := d.tasks.Execute(context.Background(), task, logger); err != nil {
+		if err := d.tasks.Execute(d.execCtx, task, logger); err != nil {
 			slog.Error("worker: task failed", "worker_id", id, "task_id", task.ID, "error", err)
 		}
 
