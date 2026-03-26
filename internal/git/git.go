@@ -77,9 +77,10 @@ func credentialHelper(workDir, token string) string {
 	if token == "" {
 		return ""
 	}
-	// Use a store-based credential: encode the helper as an inline script.
-	// This is safe for non-interactive use.
-	return fmt.Sprintf("credential.helper=!f(){ echo username=x-token; echo password=%s; };f", token)
+	// Shell-escape the token by wrapping in single quotes and replacing any
+	// embedded single quotes with '\'', preventing shell injection.
+	escaped := "'" + strings.ReplaceAll(token, "'", `'\''`) + "'"
+	return fmt.Sprintf("credential.helper=!f(){ echo username=x-token; echo password=%s; };f", escaped)
 }
 
 // run executes a git command, capturing stderr for error messages.
