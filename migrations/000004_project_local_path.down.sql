@@ -1,2 +1,2 @@
 -- local_path cannot be dropped from SQLite without recreating the table;
--- leave it in place (it is nullable / default empty) so the schema is valid.
+-- leave it in place (it is NOT NULL with default empty string) so the schema is valid.
